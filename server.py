@@ -37,6 +37,17 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def binary_response(self, body, content_type, download):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'attachment; filename="{download}"')
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
     def do_GET(self):
         try:
             self.route_get()
@@ -57,6 +68,15 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlsplit(self.path).path)
         if path == "/api/catalog":
             return self.json_response(self.store.catalog())
+        if path == "/api/robots":
+            return self.json_response({"robots": self.store.all("registered_robots")})
+        if path == "/api/deployments":
+            return self.json_response({"deployments": self.store.all("deployments")})
+        if re.fullmatch(r"/api/deployments/[0-9a-f]{32}/download", path):
+            deployment, content = self.store.deployment_package(path.split("/")[3])
+            return self.binary_response(content, "application/zip", "q1-" + deployment["robot_type"] + "-" + deployment["id"] + ".zip")
+        if re.fullmatch(r"/api/deployments/[0-9a-f]{32}", path):
+            return self.json_response(self.store.get("deployments", path.split("/")[3]))
         if path == "/api/listings":
             return self.json_response({"listings": self.store.all("listings")})
         if re.fullmatch(r"/api/motions/[0-9a-f]{32}", path):
@@ -175,6 +195,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.store.cancel(path.split("/")[3])
             elif path == "/api/listings":
                 result = self.store.create_listing(payload)
+            elif path == "/api/robots":
+                result = self.store.register_robot(payload)
+            elif path == "/api/deployments":
+                result = self.store.create_deployment(payload)
             elif path == "/api/purchases":
                 result = self.store.purchase(payload)
             else:

@@ -16,22 +16,26 @@
 repository 只包含人工選取的靜音短片、縮圖與 GIF；完整原片和下載器 metadata 不包含在 Git。
 [來源 catalog](../assets/video-examples/catalog.json) 記錄原 URL、片段 ID、起訖時間與影片 SHA-256。
 
-| 片段 ID | 動作參考 | 原片時間 | 播放短片時間 | GIF |
+| 片段 ID | 動作參考 | 骨架映射的原片時間 | 骨架映射的短片時間 | GIF |
 | --- | --- | --- | --- | --- |
-| `h2x-guard` | 護架與跨步 | 33–36 s | 0–3 s | [GIF](../assets/video-examples/leg/h2x-guard.gif) |
-| `h2x-punch` | 側身出拳 | 36–39 s | 0–3 s | [GIF](../assets/video-examples/leg/h2x-punch.gif) |
-| `h2x-turn-kick` | 轉身踢腿 | 39–41.8 s | 0–2.8 s | [GIF](../assets/video-examples/leg/h2x-turn-kick.gif) |
-| `x2-slope` | 斜坡通行 | 24–28 s | 0–4 s | [GIF](../assets/video-examples/wheel/x2-slope.gif) |
-| `x2-turn` | 坡頂轉向 | 37–40.4 s | 0–3.4 s | [GIF](../assets/video-examples/wheel/x2-turn.gif) |
+| `h2x-guard` | 護架與跨步 | 33–35.96 s | 0–2.96 s | [GIF](../assets/video-examples/leg/h2x-guard-retarget.gif) |
+| `h2x-punch` | 側身出拳 | 36–38.96 s | 0–2.96 s | [GIF](../assets/video-examples/leg/h2x-punch-retarget.gif) |
+| `h2x-turn-kick` | 轉身踢腿 | 39–40.92 s | 0–1.92 s | [GIF](../assets/video-examples/leg/h2x-turn-kick-retarget.gif) |
+| `x2-slope` | 斜坡通行 | 24–27.96 s | 0–3.96 s | [GIF](../assets/video-examples/wheel/x2-slope-retarget.gif) |
+| `x2-turn` | 坡頂轉向 | 37.2–39.88 s | 0.2–2.88 s | [GIF](../assets/video-examples/wheel/x2-turn-retarget.gif) |
 
-## Q1 Leg：把功夫拆成三個動作
+表中的時間是骨架 GIF 實際映射範圍；原始短片仍完整保留在 catalog 的 `start_s`／`end_s`。
+校正參考的 `reference_segment` 避開了鏡頭切換，因此轉身踢腿與坡頂轉向的映射短於原片節錄。
 
-![H2-X 影片到 Q1 Leg 分段工作操作](images/leg-video-training.gif)
+## Q1 Leg：骨架映射、分段與 Deploy
+
+![H2-X 影片到 Q1 Leg 分段工作操作](images/leg-operation-retarget-deploy.gif)
 
 1. 啟動 `python3 server.py --port 8876`，開啟 `http://127.0.0.1:8876/`。
 2. 在 Motion Studio 選 **雙足 Biped → 影片範例 → H2-X · 護架與跨步**。
    來源影片可以直接播放，這個已附短片不需再次下載 YouTube。
-3. 起點／終點預設為短片 `0–3 s`。可再選 `0.4–2.6 s`；畫面會顯示原片
+3. 按 **播放校正骨架＋Q1**，觀看來源骨架與 Q1 同步映射；這是保留人工校正標示的 MediaPipe 33 點格式參考，並非自動辨識已驗收。
+   這段校正參考的範圍為短片 `0–2.96 s`。可再選 `0.4–2.6 s`；畫面會顯示原片
    `33.4–35.6 s`。也可將播放器目前畫面設成起點或終點。
 4. 按 **預覽這一段**，必要時勾選 **循環預覽**。確認動作開始、結束與轉場，
    將動作名稱改成 `Q1 Leg · 護架跨步 v1`，按 **加入動作清單**。
@@ -47,25 +51,50 @@ repository 只包含人工選取的靜音短片、縮圖與 GIF；完整原片�
    這些是工作設定；實際 Q1 task 的支援組合與 reward 權重仍需 worker 驗證。
 8. 選擇地標，然後選 **30 秒概念 demo** 或 **匯出真實訓練計畫**，開始片段流程。
    Demo 完成後的閃身影片來自既有 Leg PPO，並非這次功夫片段的新訓練結果。
+9. 按 **Deploy**，註冊名稱、Leg 機型與序號，選取目標 Q1 後下載部署預覽套件。
 
 草稿保存的是機型、來源、時間與名稱；它不保存訓練好的模型，也不自動執行批次訓練。
 可對不同片段建立各自的工作與 reward／引擎／時數設定。
 
-## Q1 Wheel：用 X2-N 規劃斜坡與轉向
+## Q1 Wheel：用 X2-N 映射、分段與 Deploy
 
-![X2-N 影片到 Q1 Wheel 分段工作操作](images/wheel-video-training.gif)
+![X2-N 影片到 Q1 Wheel 分段工作操作](images/wheel-operation-retarget-deploy.gif)
 
 1. 選 **雙輪 Wheeled → 影片範例 → X2-N · 斜坡通行**。
 2. 預設短片 `0–4 s` 對應原片 `24–28 s`。例如再選 `0.5–3.5 s`，
    原片時間會是 `24.5–27.5 s`；命名 `Q1 Wheel · 斜坡通行 v1`，加入動作清單。
 3. 再選 **坡頂轉向**，預覽原片 `37–40.4 s` 的短片，另存為 `Q1 Wheel · 坡頂轉向 v1`。
 4. 針對各動作設定規劃，例如輪速追蹤、平衡與平滑 reward，再選 physics、時數與地標。
-5. 需要真實訓練時匯出工作 JSON。worker 必須先補足輪速／車身運動／接觸 reference，
+5. 完成 demo 後按 **Deploy**，註冊或選擇 Wheel 機型的 Q1，下載其部署預覽套件。
+6. 需要真實訓練時匯出工作 JSON。worker 必須先補足輪速／車身運動／接觸 reference，
    註冊並驗證目前原生 23 軸 Q1 Wheel task，再接受 PPO 訓練。
 
 人體姿態模型無法直接給出輪速、滑動、接觸力或可靠世界座標。
 不能將 X2-N 的動作或人類足部軌跡直接載入 Q1 輪式控制器，也不能沿用不相容的舊 24 軸 wheel PPO。
 目前結果頁的 wheel 滑行影片保留「歷史 24 軸版本」來源標示。
+
+## 動畫與骨架資料的來源
+
+上方兩份操作 GIF 在模型與影片完整載入後才開始取幀；表格中的五份 GIF 同步呈現
+來源影片、MediaPipe 33 點格式骨架與原生 Q1。為避免把背景人物當來源機器人，示範骨架
+含人工校正，動畫及 JSON 保留其來源標示。它們沒有完成物理、接觸或新 PPO 的驗收。
+
+即時 MediaPipe 仍可另外執行；機器人候選需要人工核對。已附的校正參考不會冒充成
+當次自動偵測結果。單鏡頭幾何參考仍不具可靠輪速、世界軌跡與接觸資訊。
+
+操作動畫以來源時間碼逐幀擷取，讓骨架與 Q1 有連續變化；略去初始載入與 30 秒 demo 的靜態等待畫面，沒有修改後端時鐘或偽造訓練結果。
+
+## 註冊機器人與 Deploy 下載
+
+1. 在完成的成果頁按 **Deploy**。
+2. 填寫 Q1 的顯示名稱、機型與序號，保存註冊資料。
+3. 選取相符機型的目標 Q1，下載部署 ZIP。
+4. 檢查套件的目標機器人、URDF SHA、關節契約、工作計畫與附帶 motion。
+
+目前所有 demo 套件都是 `preview_only`，`deployable=false`、`checkpoint_included=false`、
+`hardware_activation_allowed=false`、`device_acknowledged=false`。它們沒有新 policy，
+不能啟動實體機器人；網頁也不會將瀏覽器下載標成已傳送或已在 Q1 執行。
+完整實機流程仍需 Q1 robot agent、已驗證 policy 與裝置回報。機型或 URDF 不符時會拒絕建立套件。
 
 ## 時間、動作名稱與工作 JSON
 
@@ -140,3 +169,17 @@ python3 scripts/prepare_video_examples.py --cache-dir /tmp/q1-store-youtube-exam
 
 下載器只接受這兩個指定來源並保留來源連結；完整下載器 metadata 留在 cache，
 repository 中的 catalog 不含臨時串流網址或下載憑證。原片水印與來源標示保留，剪輯沒有原始音訊。
+
+## 重新錄製操作動畫
+
+安裝 Playwright 並啟動本機 API 後，使用以下腳本。它先等原生 meshes、影片及字型載入完成，
+才擷取首幀；資料包含骨架參考的時間碼取幀，以及實際註冊／Deploy ZIP 下載。
+
+```bash
+npm install
+Q1_STORE_URL=http://127.0.0.1:8876 Q1_RECORD_ROBOT=leg node scripts/record_deploy_demo.mjs
+Q1_STORE_URL=http://127.0.0.1:8876 Q1_RECORD_ROBOT=wheel node scripts/record_deploy_demo.mjs
+```
+
+腳本需要 ffmpeg；臨時影格、ZIP 與驗證報告預設放在 `/tmp/q1-deploy-demo/`。
+README 使用新的 `*-operation-retarget-deploy.gif` 檔名，避免瀏覽器快取先前的載入畫面。

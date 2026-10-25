@@ -27,7 +27,7 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
   podium.rotation.x=Math.PI/2;podium.position.z=-.025;scene.add(podium);
   const grid=new THREE.GridHelper(12,60,0xe0e4ea,0xe9ecf1);grid.rotation.x=Math.PI/2;grid.position.z=-.05;scene.add(grid);
   const landmarkGroup=new THREE.Group();scene.add(landmarkGroup);
-  let robot=null,manifest=null,disposed=false,frame=0,last=0,playing=false,motion='stand',time=0,loadToken=0,visible=false,hasSize=false;
+  let robot=null,manifest=null,disposed=false,frame=0,last=0,playing=false,motion='stand',time=0,loadToken=0,visible=false,hasSize=false,renderingPaused=false;
   const bounds=new THREE.Box3(),target=new THREE.Vector3(0,0,.75);
   const material=new THREE.MeshStandardMaterial({color:0xcbd2df,roughness:.8,metalness:.1,transparent:true,opacity:.33});
   function landmarkBox(x,y,z,w,d,h){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,d,h),material);mesh.position.set(x,y,z+h/2);landmarkGroup.add(mesh);}
@@ -130,13 +130,13 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
   }
   function animate(now){
     if(disposed)return;frame=requestAnimationFrame(animate);
-    if(document.hidden||!visible||!hasSize){last=0;return;}
+    if(document.hidden||!visible||!hasSize||renderingPaused){last=0;return;}
     if(now-last<1000/30)return;
     const delta=last?Math.min((now-last)/1000,.1):0;last=now;
     if(playing&&robot){time+=delta;setJoints(demoPose(time));}
     controls.update();renderer.render(scene,camera);
   }
-  const api={loadRobot,setJoints,setMotion(name,t){motion=name;if(Number.isFinite(t))time=t;if(robot)setJoints(demoPose(time));return api;},setPlaying(value){playing=!!value;return api;},setLandmark,
+  const api={loadRobot,setJoints,setRenderingPaused(value){renderingPaused=!!value;last=0;return api;},setMotion(name,t){motion=name;if(Number.isFinite(t))time=t;if(robot)setJoints(demoPose(time));return api;},setPlaying(value){playing=!!value;return api;},setLandmark,
     getRobot(){return robot;},capture(){renderer.render(scene,camera);return renderer.domElement.toDataURL('image/png');},
     dispose(){if(disposed)return;disposed=true;loadToken++;cancelAnimationFrame(frame);observer.disconnect();visibilityObserver.disconnect();controls.dispose();disposeModel(robot);scene.traverse(o=>{o.geometry?.dispose();if(o.material&&!Array.isArray(o.material))o.material.dispose();});renderer.dispose();renderer.domElement.remove();}};
   frame=requestAnimationFrame(animate);return api;

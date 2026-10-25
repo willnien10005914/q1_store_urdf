@@ -1,8 +1,9 @@
+import {zipStored} from './zip.js';
 import {validateSegment} from './clip-editor.js';
 /** Native Python API when available; explicit browser-local demo on static hosting. */
 let local=false,catalog;
 const key='q1-store-v1';
-function read(){try{return JSON.parse(localStorage.getItem(key))||{jobs:{},motions:{},listings:[],purchases:[]};}catch{return {jobs:{},motions:{},listings:[],purchases:[]};}}
+function read(){const defaults={jobs:{},motions:{},listings:[],purchases:[],robots:[],deployments:[]};try{return {...defaults,...(JSON.parse(localStorage.getItem(key))||{})};}catch{return defaults;}}
 function save(data){localStorage.setItem(key,JSON.stringify(data));}
 function uid(){return crypto.randomUUID().replaceAll('-','');}
 const library=[['rsl_rl','RSL-RL · PPO'],['skrl','skrl · PPO'],['rl_games','RL-Games · PPO'],['sb3','Stable-Baselines3 · PPO'],['torchrl','TorchRL · PPO']];
@@ -34,6 +35,10 @@ export async function api(path,body){
  const id=uid(),job={...body,source,segment,id,state:body.mode==='worker'?'queued_for_worker':'ingesting',progress:0,elapsed_s:0,created_at:Date.now()/1000,result:null,browser_local:true};job.plan=plan(job);data.jobs[id]=job;save(data);return job;}
  if(path.startsWith('/api/jobs/')){const id=path.split('/')[3],job=data.jobs[id];if(!job)throw Error('找不到工作');if(path.endsWith('/cancel'))job.state='cancelled';advance(job);save(data);return path.endsWith('/plan')?plan(job):job;}
  if(path==='/api/motions'&&body){const id=uid();data.motions[id]={id,...body};save(data);return {id};}
+ if(path==='/api/robots'&&!body)return {robots:data.robots};
+ if(path==='/api/robots'&&body){const name=String(body.name||'').trim(),serial=String(body.serial||'').trim(),robot=catalog.robots.find(r=>r.id===body.robot_type);if(!robot||!name||name.length>60||!serial||serial.length>80||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(serial)||/[\u0000-\u001f]/.test(name))throw Error('請輸入有效的機型、名稱與序號。');if(data.robots.some(r=>r.serial.toLowerCase()===serial.toLowerCase()))throw Error('這個序號已註冊。');const registered={id:uid(),name,serial,robot_type:robot.id,urdf_sha256:robot.urdf_sha256,control_joints:robot.control_joints,connection_state:'not_connected',hardware_delivery:false,created_at:Date.now()/1000};data.robots.push(registered);save(data);return registered;}
+ if(path==='/api/deployments'&&!body)return {deployments:data.deployments};
+ if(path==='/api/deployments'&&body){const job=data.jobs[body.job_id],robot=data.robots.find(r=>r.id===body.robot_id);if(!job||advance(job).state!=='complete')throw Error('請先完成動作工作。');if(!robot||robot.robot_type!==job.robot_type)throw Error('註冊機器人與工作機型不符。');const current=catalog.robots.find(r=>r.id===robot.robot_type);if(robot.urdf_sha256!==current.urdf_sha256||job.plan?.robot?.urdf_sha256!==current.urdf_sha256)throw Error('機器人或工作的 URDF 版本已變更。');if(JSON.stringify(robot.control_joints)!==JSON.stringify(current.control_joints))throw Error('註冊機器人的控制關節契約已變更。');const deployment={id:uid(),job_id:job.id,robot_id:robot.id,robot_type:robot.robot_type,target_robot:{...robot},status:'package_ready',package_kind:'preview_only',deployable:false,hardware_activation_allowed:false,checkpoint_included:false,device_acknowledged:false,transport:'browser_download',created_at:Date.now()/1000};deployment.download_url='browser-local:'+deployment.id;data.deployments.push(deployment);save(data);return deployment;}
  if(path==='/api/listings'&&!body)return {listings:data.listings};
  if(path==='/api/listings'&&body){const job=data.jobs[body.job_id];if(!job||advance(job).state!=='complete')throw Error('請先完成 demo。');const listing={...body,id:uid(),robot_type:job.robot_type,video_url:job.result.video_url,provenance:job.result.provenance,newly_trained:false,demo:true,created_at:Date.now()/1000};data.listings.unshift(listing);save(data);return listing;}
  if(path==='/api/purchases'&&body){const listing=data.listings.find(l=>l.id===body.listing_id);if(!listing)throw Error('找不到作品');const receipt={id:uid(),listing_id:listing.id,amount:listing.price,demo:true,charged:false};data.purchases.push(receipt);save(data);return receipt;}
@@ -44,3 +49,10 @@ export async function uploadVideo(file){
  const r=await fetch('/api/uploads',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-Filename':encodeURIComponent(file.name)},body:file});const d=await r.json();if(!r.ok)throw Error(d.error||'影片上傳失敗');return d;
 }
 export async function downloadPlan(job){const data=await api('/api/jobs/'+job.id+'/plan');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));return url;}
+
+export async function downloadDeployment(deployment){
+ let blob;
+ if(local){const data=read(),job=data.jobs[deployment.job_id],motion=data.motions[job.motion_id],reference=catalog.robots.find(r=>r.id===deployment.robot_type);const manifest={schema:'q1-store.deployment.v1',...deployment,policy_format:null,checkpoint:null,scope:'Preview-only configuration package; no runnable policy and no hardware activation.'};const files={'manifest.json':JSON.stringify(manifest,null,2),'job-plan.json':JSON.stringify(plan(job),null,2),'robot-contract.json':JSON.stringify(reference,null,2),'README.txt':'Q1 preview deployment package\nTarget: '+deployment.target_robot.name+' / '+deployment.target_robot.serial+'\nNo checkpoint is included. This package does not activate hardware.\nBrowser download is not a robot delivery acknowledgment. Use a compatible robot agent and a verified policy for actual deployment.\n'};if(motion)files['motion.json']=JSON.stringify(motion);blob=zipStored(files);}
+ else{const response=await fetch(deployment.download_url);if(!response.ok){const error=await response.json();throw Error(error.error||'套件下載失敗。');}blob=await response.blob();}
+ const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='q1-'+deployment.robot_type+'-'+deployment.id.slice(0,12)+'-preview.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return {size:blob.size,filename:a.download};
+}

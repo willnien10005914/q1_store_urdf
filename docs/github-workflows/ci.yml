@@ -31,6 +31,9 @@ jobs:
         run: |
           node tests/test_retarget.mjs
           node tests/test_clips.mjs
+          node tests/test_reference.mjs
+          node tests/test_zip.mjs
+          node tests/test_static_registry.mjs
       - name: Verify native assets and provenance
         run: |
           python3 - <<'PY'

@@ -1,5 +1,7 @@
 """Meaningful state, persistence, upload, and HTTP isolation checks; no GPU needed."""
 import json
+import io
+import zipfile
 import copy
 import hashlib
 from pathlib import Path
@@ -197,6 +199,82 @@ class StoreTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(APIError):
                 youtube_url(value)
 
+    def registered_robot(self, **updates):
+        payload = {"name": "My Q1 Leg", "robot_type": "leg", "serial": "Q1-LEG-001"}
+        payload.update(updates)
+        return self.store.register_robot(payload)
+
+    def test_registered_robot_contract_and_serial_validation(self):
+        robot = self.registered_robot(urdf_sha256="forged", control_joints=["wrong"])
+        self.assertEqual(robot["control_joints"], ["hip"])
+        self.assertEqual(robot["urdf_sha256"], self.store.catalog()["robots"][0]["urdf_sha256"])
+        self.assertEqual(robot["connection_state"], "not_connected")
+        self.assertFalse(robot["hardware_delivery"])
+        self.assertEqual(Store(self.root).get("registered_robots", robot["id"]), robot)
+        for update in [{"serial": "q1-leg-001"}, {"serial": "../../robot"}, {"serial": "bad\nserial"},
+                       {"serial": "x" * 81}, {"name": ""}, {"name": "\nRobot"}, {"name": "x" * 61},
+                       {"robot_type": "other"}, {"serial": None}]:
+            with self.subTest(update=update), self.assertRaises(APIError):
+                self.registered_robot(**update)
+
+    def test_robot_registration_checks_actual_native_file_hash(self):
+        (self.root / "assets/robots/leg/native.urdf").write_bytes(b"changed model")
+        with self.assertRaises(APIError):
+            self.registered_robot()
+
+    def test_deployment_download_is_targeted_inert_and_persistent(self):
+        motion = self.store.create_motion(self.motion())
+        job = self.store.create_job(self.payload(motion_id=motion["id"], action_name="Leg retarget"))
+        robot = self.registered_robot()
+        with self.assertRaises(APIError):
+            self.store.create_deployment({"job_id": job["id"], "robot_id": robot["id"]})
+        self.now += 31
+        deployment = self.store.create_deployment({"job_id": job["id"], "robot_id": robot["id"],
+                                                  "deployable": True, "hardware_activation_allowed": True})
+        self.assertEqual(deployment["status"], "package_ready")
+        self.assertEqual(deployment["target_robot"]["serial"], robot["serial"])
+        for field in ["deployable", "hardware_activation_allowed", "checkpoint_included", "device_acknowledged", "newly_trained"]:
+            self.assertIs(deployment[field], False)
+        metadata, content = Store(self.root).deployment_package(deployment["id"])
+        self.assertEqual(metadata["package_sha256"], hashlib.sha256(content).hexdigest())
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self.assertEqual(set(archive.namelist()), {"manifest.json", "job-plan.json", "robot-contract.json", "motion.json", "README.txt"})
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(manifest["robot_id"], robot["id"])
+            self.assertEqual(manifest["package_kind"], "preview_only")
+            self.assertFalse(manifest["hardware_delivery"])
+            self.assertFalse(manifest["deployable"])
+            self.assertFalse(manifest["checkpoint_included"])
+            self.assertEqual(json.loads(archive.read("motion.json"))["frames"], self.motion()["frames"])
+            self.assertEqual(json.loads(archive.read("robot-contract.json"))["control_joints"], ["hip"])
+            for item in manifest["files"]:
+                self.assertEqual(hashlib.sha256(archive.read(item["path"])).hexdigest(), item["sha256"])
+            self.assertIn(b"no runnable PPO checkpoint", archive.read("README.txt"))
+        (self.store.deployment_dir / (deployment["id"] + ".zip")).write_bytes(b"tampered")
+        with self.assertRaises(APIError):
+            self.store.deployment_package(deployment["id"])
+
+    def test_deployment_rejects_wrong_robot_stale_contract_and_queued_job(self):
+        robot = self.registered_robot()
+        wheel = self.store.create_job(self.payload("wheel"))
+        worker = self.store.create_job(self.payload(mode="worker"))
+        self.now += 31
+        for job in [wheel, worker]:
+            with self.subTest(job=job["robot_type"]), self.assertRaises(APIError):
+                self.store.create_deployment({"job_id": job["id"], "robot_id": robot["id"]})
+        leg = self.store.create_job(self.payload())
+        self.now += 31
+        changed = dict(robot, urdf_sha256="0" * 64)
+        self.store.put("registered_robots", changed)
+        with self.assertRaises(APIError):
+            self.store.create_deployment({"job_id": leg["id"], "robot_id": robot["id"]})
+        self.store.put("registered_robots", robot)
+        manifest = json.loads((self.root / "assets/robots/manifest.json").read_text())
+        manifest["robots"][0]["urdf_sha256"] = "1" * 64
+        (self.root / "assets/robots/manifest.json").write_text(json.dumps(manifest))
+        with self.assertRaises(APIError):
+            self.store.create_deployment({"job_id": leg["id"], "robot_id": robot["id"]})
+
     def motion(self):
         return {"schema": 1, "source": "mediapipe_pose_landmarker", "robot_type": "leg", "target_person": "person-1", "demo": False,
                 "physical_simulation": False, "mapping": {"method": "geometric_native_axes_v1", "joint_limits_enforced": True, "root_motion": False},
@@ -247,6 +325,14 @@ class HTTPTests(unittest.TestCase):
         (cls.root / "public/vendor/test.js").write_text("export const working=true;")
         (cls.root / "assets").mkdir()
         (cls.root / "assets/test.mp4").write_bytes(b"0123456789")
+        (cls.root / "assets/robots/leg").mkdir(parents=True)
+        urdf = b'<robot name="test"><joint name="hip" type="revolute"><limit lower="-1" upper="1"/></joint></robot>'
+        (cls.root / "assets/robots/leg/native.urdf").write_bytes(urdf)
+        (cls.root / "assets/robots/manifest.json").write_text(json.dumps({"robots": [
+            {"id": "leg", "urdf_url": "/assets/robots/leg/native.urdf", "urdf_sha256": hashlib.sha256(urdf).hexdigest(), "control_joints": ["hip"]}]}))
+        (cls.root / "assets/examples").mkdir()
+        (cls.root / "assets/examples/catalog.json").write_text(json.dumps({"examples": [
+            {"id": "leg-example", "robot_type": "leg", "video_url": "/assets/test.mp4", "provenance": "historical demo"}]}))
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         cls.server.store = Store(cls.root)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -282,6 +368,30 @@ class HTTPTests(unittest.TestCase):
         for path in ["/.data/store.sqlite3", "/server.py", "/assets/../server.py", "/assets/%2e%2e/server.py", "/.git/config"]:
             with self.subTest(path=path):
                 self.assertEqual(self.request("GET", path)[0], 404)
+
+    def test_registry_and_deployment_zip_http_contract(self):
+        status, _, body = self.request("POST", "/api/robots", json.dumps({"name": "HTTP Q1", "robot_type": "leg", "serial": "HTTP-001"}).encode(), {"Content-Type": "application/json"})
+        self.assertEqual(status, 201)
+        robot = json.loads(body)
+        self.assertTrue(any(r["id"] == robot["id"] for r in json.loads(self.request("GET", "/api/robots")[2])["robots"]))
+        store = self.server.store
+        job = store.create_job({"robot_type": "leg", "source": {"type": "example", "id": "leg-example"}})
+        job["created_at"] -= 31
+        store.put("jobs", job)
+        status, _, body = self.request("POST", "/api/deployments", json.dumps({"job_id": job["id"], "robot_id": robot["id"]}).encode(), {"Content-Type": "application/json"})
+        self.assertEqual(status, 201)
+        deployment = json.loads(body)
+        self.assertFalse(deployment["device_acknowledged"])
+        status, headers, content = self.request("GET", deployment["download_url"])
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "application/zip")
+        self.assertIn("attachment", headers["Content-Disposition"])
+        self.assertEqual(int(headers["Content-Length"]), len(content))
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            self.assertFalse(json.loads(archive.read("manifest.json"))["deployable"])
+        self.assertEqual(self.request("HEAD", deployment["download_url"])[2], b"")
+        self.assertEqual(len(json.loads(self.request("GET", "/api/deployments")[2])["deployments"]), 1)
+        self.assertEqual(self.request("GET", "/.data/deployment-packages/" + deployment["id"] + ".zip")[0], 404)
 
     def test_api_errors_and_cross_site_posts_are_json(self):
         self.assertEqual(self.request("POST", "/api/jobs", b"{}", {"Content-Type": "application/json", "Origin": "https://evil.test"})[0], 403)

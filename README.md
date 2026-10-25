@@ -17,21 +17,28 @@ marketplace. It does not train a new PPO policy or charge payments.
 可直接播放、調整起訖、命名並建立各自的訓練工作，不必重新下載 YouTube。
 原影片展示的是 H2-X／X2-N；以下短片與 GIF 是**來源參考**，不是 Q1 新訓練的成果。
 
-**Q1 Leg 操作：選功夫片段 → 再分段／命名 → 保存動作 → 設計訓練 → 工作計畫。**
+**Q1 Leg 操作：已載入模型 → 骨架與 Q1 同步映射 → 分段／命名 → 訓練示範 → Deploy 下載。**
 
-![使用 H2-X 功夫來源影片建立 Q1 Leg 分段訓練計畫](docs/images/leg-video-training.gif)
+![Q1 Leg 已載入模型、骨架映射與註冊機器人 Deploy 操作動畫](docs/images/leg-operation-retarget-deploy.gif)
 
-**Q1 Wheel 操作：選 X2-N 片段 → 切分斜坡／轉向動作 → 設計雙輪訓練。**
+**Q1 Wheel 操作：已載入模型 → 骨架與 Q1 同步映射 → 切分輪式動作 → Deploy 下載。**
 
-![使用 X2-N 來源影片建立 Q1 Wheel 分段訓練計畫](docs/images/wheel-video-training.gif)
+![Q1 Wheel 已載入模型、骨架映射與註冊機器人 Deploy 操作動畫](docs/images/wheel-operation-retarget-deploy.gif)
 
-| 目標機型與動作 | 原 YouTube 時間／短片時間 | 原片節錄 GIF |
+兩份操作動畫都在模型與影片載入完成後才開始取幀，第一幀直接呈現骨架與原生 Q1。
+
+| 目標機型與動作 | 骨架 GIF 的原片時間／短片時間 | 來源骨架＋Q1 retargeting GIF |
 | --- | --- | --- |
-| Leg · 護架與跨步 | 00:33–00:36／0–3 s | ![H2-X 護架與跨步參考](assets/video-examples/leg/h2x-guard.gif) |
-| Leg · 側身出拳 | 00:36–00:39／0–3 s | ![H2-X 側身出拳參考](assets/video-examples/leg/h2x-punch.gif) |
-| Leg · 轉身踢腿 | 00:39–00:41.8／0–2.8 s | ![H2-X 轉身踢腿參考](assets/video-examples/leg/h2x-turn-kick.gif) |
-| Wheel · 斜坡通行 | 00:24–00:28／0–4 s | ![X2-N 斜坡通行參考](assets/video-examples/wheel/x2-slope.gif) |
-| Wheel · 坡頂轉向 | 00:37–00:40.4／0–3.4 s | ![X2-N 坡頂轉向參考](assets/video-examples/wheel/x2-turn.gif) |
+| Leg · 護架與跨步 | 00:33–00:35.96／0–2.96 s | ![H2-X 護架與跨步參考](assets/video-examples/leg/h2x-guard-retarget.gif) |
+| Leg · 側身出拳 | 00:36–00:38.96／0–2.96 s | ![H2-X 側身出拳參考](assets/video-examples/leg/h2x-punch-retarget.gif) |
+| Leg · 轉身踢腿 | 00:39–00:40.92／0–1.92 s | ![H2-X 轉身踢腿參考](assets/video-examples/leg/h2x-turn-kick-retarget.gif) |
+| Wheel · 斜坡通行 | 00:24–00:27.96／0–3.96 s | ![X2-N 斜坡通行參考](assets/video-examples/wheel/x2-slope-retarget.gif) |
+| Wheel · 坡頂轉向 | 00:37.2–00:39.88／0.2–2.88 s | ![X2-N 坡頂轉向參考](assets/video-examples/wheel/x2-turn-retarget.gif) |
+
+表中動畫同步呈現來源影片、MediaPipe 33 點格式骨架與 Q1 關節映射。
+為避免追到背景人物，這批示範參考含人工校正，畫面與資料保留其來源標示；
+它們是幾何 retargeting 參考，並非自動辨識已驗收或新 PPO 的物理結果。
+骨架參考會避開不連續鏡頭，時間範圍可能短於附帶的原始短片；以 catalog 的 `reference_segment` 為準。
 
 片段欄位以**目前短片的相對秒數**為基準；畫面與工作 JSON 同時保存原 YouTube 的
 絕對時間。例如 `h2x-guard` 再選 `0.4–2.6 s`，對應原片 `33.4–35.6 s`。
@@ -42,7 +49,8 @@ MediaPipe Pose 是人體姿態模型；H2-X 實測曾偵測到背景人物，候
 明確選取，才開始輸出關節。若只有背景人物，請留空並保存**待提取參考動作的訓練計畫**，
 交由機器人專用 tracker 或人工標記補足。Wheel 另需輪速、車身運動與接觸 reference。
 
-目前可完成影片分段與訓練規劃 demo；**全自動機器人影片 → Q1 PPO 尚未實作，也沒有產生新權重**。
+目前可播放校正骨架並同步映射到 Q1，也可分段與建立訓練規劃；
+**全自動機器人影片 → Q1 PPO 尚未實作，也沒有產生新權重**。
 不會以背景人物或程序化骨架冒充來源機器人的 retargeting。
 
 完整步驟、時間欄位與重新產生剪輯的指令見
@@ -57,6 +65,7 @@ MediaPipe Pose 是人體姿態模型；H2-X 實測曾偵測到背景人物，候
 | --- | --- |
 | 雙足／雙輪原生 URDF | 可操作。載入各自 CAD meshes、關節名稱、限位與 mimic。可拖曳旋轉。 |
 | 指定影片／分段動作 | 可操作。H2-X → Leg、X2-N → Wheel 共五個真實來源短片；可設定起訖、命名、保存多個動作片段及建立獨立工作。 |
+| 校正骨架＋Q1 同步播放 | 可操作。播放已附的人工校正 MediaPipe 33 點格式參考，同步更新來源骨架與原生 Q1 關節；可匯出 motion，仍需物理驗證。 |
 | 程序化骨架示範 | 保留為離線多人選取與映射練習；不是指定影片的辨識結果，也不是新 PPO。 |
 | 使用者影片 | 可操作。MP4／WebM／MOV 等瀏覽器可解碼影片，MediaPipe 在瀏覽器辨識最多 4 位人物；依顏色選取目標。 |
 | 人體影片 retargeting | 可操作。人物姿態映射到所選原生關節，限制角度並匯出 JSON；是幾何參考，未做逆動力學、接觸或平衡驗收。機器人影片需先核對及明確選取候選。 |
@@ -65,6 +74,7 @@ MediaPipe Pose 是人體姿態模型；H2-X 實測曾偵測到背景人物，候
 | 地標舞台 | 可選台北 101、艾菲爾鐵塔、時代廣場、澀谷、萬里長城。3D 畫面是概念輪廓；尚無地標 USD／RTX 實錄。 |
 | 30 秒 demo 流程 | 可操作。展示 retargeting → 訓練示意 → rendering 示意，完成後播放已標示來源的歷史 PPO 影片。 |
 | 真實訓練模式 | 匯出工作 JSON，狀態維持等待外部 worker；不會自動開始訓練或變成成功。 |
+| 註冊 Q1／Deploy | 完成 demo 後可註冊名稱、機型與序號，選擇相符的 Q1，下載目標機器人的部署預覽套件。現階段不含新 policy 權重，不會傳送控制命令或宣稱機器人已接收。 |
 | 分享／價格／收藏／購買 | 可操作的模擬市集。保存分享記錄與零收款收據；沒有真實付款或交付新權重。 |
 
 **這次輸入的功夫／使用者影片不會在 30 秒內訓練成 PPO。** 示範成果也不是
@@ -121,11 +131,21 @@ YouTube 嵌入播放器只能預覽；要執行 MediaPipe，必須取得可讀�
 6. 設定 **1–24 小時**訓練預算、選擇地標，再開始 **30 秒概念 demo**。
    時數是預算設定，不是成果保證；**匯出真實訓練計畫**只建立待 worker 的工作。
 7. 完成後觀看對應機型的歷史參考影片、下載工作 JSON、分享至市集並模擬收藏／購買。
+8. 按 **Deploy**，註冊或選取相符機型的 Q1，下載部署預覽套件；目前套件不含新 policy，不能啟動實體機器人。
    本機 `.data/` 工作記錄包含片段 ID（`source.id`）、`action_name`、`segment` 與原片絕對時間。
    計畫的 `motion_extraction_ready` 表示是否已有非程序化 capture，不表示人物、機器人映射或物理品質已驗證。
 
 單鏡頭映射沒有真實尺度與完整遮擋資訊；人物交叉、遮擋或離開畫面可能造成追蹤中斷。
 此處的色彩是追蹤 ID，不代表衣服辨識。幾何預覽不可直接當作實機控制策略。
+
+## Deploy 到已註冊的 Q1
+
+成果頁完成後可按 **Deploy**，填寫機器人名稱、機型與序號，再選取目標 Q1 下載 ZIP。
+本機 API 會核對 Leg／Wheel 與原生 URDF 版本，套件保存目標機器人、工作計畫、關節契約及可用的動作參考。
+
+目前 demo 下載的是 **preview-only 部署預覽套件**：沒有新 policy 權重、禁止啟動硬體，
+也不會把瀏覽器下載標示為機器人已接收。真正下載到機器人並執行，仍需接上 Q1 robot agent、
+經驗證的 policy 與裝置回報；舊 24 軸 Wheel 策略不會被當成目前 23 軸模型的可執行權重。
 
 ## 已有的真實訓練影片
 

@@ -1,0 +1,110 @@
+{
+  "scope": "Source-robot manual-corrected MediaPipe-format geometric references; not automatic detection or PPO. Q1 crop excludes all clocks and captions.",
+  "checks": [
+    {
+      "id": "h2x-guard",
+      "gif_frames": 30,
+      "size": [
+        1024,
+        480
+      ],
+      "right_model_crop_mean_difference": 4.151,
+      "right_model_changed_pixels_gt20": 6007,
+      "max_joint_range_rad": 2.3375,
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 2.96
+      },
+      "motion_backend_validation": {
+        "urdf_joint_names": true,
+        "urdf_position_limits": true,
+        "monotonic_timestamps": true,
+        "physical_validation": false
+      }
+    },
+    {
+      "id": "h2x-punch",
+      "gif_frames": 30,
+      "size": [
+        1024,
+        480
+      ],
+      "right_model_crop_mean_difference": 5.626,
+      "right_model_changed_pixels_gt20": 7715,
+      "max_joint_range_rad": 2.3358,
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 2.96
+      },
+      "motion_backend_validation": {
+        "urdf_joint_names": true,
+        "urdf_position_limits": true,
+        "monotonic_timestamps": true,
+        "physical_validation": false
+      }
+    },
+    {
+      "id": "h2x-turn-kick",
+      "gif_frames": 20,
+      "size": [
+        1024,
+        480
+      ],
+      "right_model_crop_mean_difference": 5.537,
+      "right_model_changed_pixels_gt20": 7517,
+      "max_joint_range_rad": 2.1242,
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 1.92
+      },
+      "motion_backend_validation": {
+        "urdf_joint_names": true,
+        "urdf_position_limits": true,
+        "monotonic_timestamps": true,
+        "physical_validation": false
+      }
+    },
+    {
+      "id": "x2-slope",
+      "gif_frames": 40,
+      "size": [
+        1024,
+        480
+      ],
+      "right_model_crop_mean_difference": 2.751,
+      "right_model_changed_pixels_gt20": 4274,
+      "max_joint_range_rad": 0.6137,
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 3.96
+      },
+      "motion_backend_validation": {
+        "urdf_joint_names": true,
+        "urdf_position_limits": true,
+        "monotonic_timestamps": true,
+        "physical_validation": false
+      }
+    },
+    {
+      "id": "x2-turn",
+      "gif_frames": 27,
+      "size": [
+        1024,
+        480
+      ],
+      "right_model_crop_mean_difference": 2.054,
+      "right_model_changed_pixels_gt20": 3699,
+      "max_joint_range_rad": 0.3515,
+      "reference_segment": {
+        "start_s": 0.2,
+        "end_s": 2.88
+      },
+      "motion_backend_validation": {
+        "urdf_joint_names": true,
+        "urdf_position_limits": true,
+        "monotonic_timestamps": true,
+        "physical_validation": false
+      }
+    }
+  ]
+}

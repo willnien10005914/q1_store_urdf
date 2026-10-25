@@ -47,7 +47,15 @@
       "newly_trained": false,
       "audio_removed": true,
       "video_sha256": "1910ee3d388bf04e3d5adf4e4509b10f1a1a22f6bc7cc256bff1ca677c7ed47a",
-      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。"
+      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。",
+      "motion_reference_url": "/assets/video-examples/leg/h2x-guard-reference.json",
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 2.96
+      },
+      "skeleton_source": "manual_corrected_mediapipe_reference",
+      "manual_correction": true,
+      "retarget_gif_url": "/assets/video-examples/leg/h2x-guard-retarget.gif"
     },
     {
       "id": "h2x-punch",
@@ -69,7 +77,15 @@
       "newly_trained": false,
       "audio_removed": true,
       "video_sha256": "83cff341ea0e26165ab3978f5cc06ab2f9f6ec43d64134e6a2e200a7e278bd9c",
-      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。"
+      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。",
+      "motion_reference_url": "/assets/video-examples/leg/h2x-punch-reference.json",
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 2.96
+      },
+      "skeleton_source": "manual_corrected_mediapipe_reference",
+      "manual_correction": true,
+      "retarget_gif_url": "/assets/video-examples/leg/h2x-punch-retarget.gif"
     },
     {
       "id": "h2x-turn-kick",
@@ -91,7 +107,15 @@
       "newly_trained": false,
       "audio_removed": true,
       "video_sha256": "c6aafe2e837ac5099f6b652f6b91a944fc280e4f37d05132cdf944b39e8de336",
-      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。"
+      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。",
+      "motion_reference_url": "/assets/video-examples/leg/h2x-turn-kick-reference.json",
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 1.92
+      },
+      "skeleton_source": "manual_corrected_mediapipe_reference",
+      "manual_correction": true,
+      "retarget_gif_url": "/assets/video-examples/leg/h2x-turn-kick-retarget.gif"
     },
     {
       "id": "x2-slope",
@@ -113,7 +137,15 @@
       "newly_trained": false,
       "audio_removed": true,
       "video_sha256": "0a5563304b58f31bbb1338f2d8014bd97c4675574c64aa5ca1ea08833f3c95a7",
-      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。"
+      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。",
+      "motion_reference_url": "/assets/video-examples/wheel/x2-slope-reference.json",
+      "reference_segment": {
+        "start_s": 0,
+        "end_s": 3.96
+      },
+      "skeleton_source": "manual_corrected_mediapipe_reference",
+      "manual_correction": true,
+      "retarget_gif_url": "/assets/video-examples/wheel/x2-slope-retarget.gif"
     },
     {
       "id": "x2-turn",
@@ -135,7 +167,15 @@
       "newly_trained": false,
       "audio_removed": true,
       "video_sha256": "1f40607bb282ab57d45645192786d5c90a105ac5d7c91c9fce69fa95ae18e9a1",
-      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。"
+      "note": "來源為他款機器人的剪輯影片；人體姿態模型可能漏檢或誤選背景人物。此片段不是 Q1 訓練成果或實機驗證。",
+      "motion_reference_url": "/assets/video-examples/wheel/x2-turn-reference.json",
+      "reference_segment": {
+        "start_s": 0.2,
+        "end_s": 2.88
+      },
+      "skeleton_source": "manual_corrected_mediapipe_reference",
+      "manual_correction": true,
+      "retarget_gif_url": "/assets/video-examples/wheel/x2-turn-retarget.gif"
     }
   ],
   "scope": "Attributed source excerpts for segment selection and Q1 training plans; not newly trained Q1 policies."

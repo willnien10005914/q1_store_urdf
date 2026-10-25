@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 from contextlib import contextmanager
 import json
 import math
@@ -14,6 +15,7 @@ import subprocess
 import threading
 import time
 import uuid
+import zipfile
 from urllib.parse import parse_qs, urlsplit
 import xml.etree.ElementTree as ET
 
@@ -105,12 +107,14 @@ class Store:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.upload_dir = self.data_dir / "uploads"
         self.upload_dir.mkdir(exist_ok=True)
+        self.deployment_dir = self.data_dir / "deployment-packages"
+        self.deployment_dir.mkdir(exist_ok=True)
         self.db_path = self.data_dir / "store.sqlite3"
         self.clock = clock
         self.lock = threading.RLock()
         self.downloader = os.environ.get("Q1_YTDLP") or shutil.which("yt-dlp")
         with self.connection() as db:
-            for table in ("jobs", "uploads", "motions", "listings", "purchases"):
+            for table in ("jobs", "uploads", "motions", "listings", "purchases", "registered_robots", "deployments"):
                 db.execute(f"CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
 
     @contextmanager
@@ -153,6 +157,7 @@ class Store:
                 "youtube_ingest": bool(self.downloader), "upload": True, "motion_storage": True,
                 "video_segments": True, "segment_min_s": .5, "segment_max_s": 60,
                 "payments": "demo_only", "training": "demo_or_external_worker_manifest",
+                "robot_registry": True, "deployment_download": True, "hardware_delivery": False,
                 "physics_scope": "實際後端支援須由 Q1 task adapter 驗證；選單是訓練規劃。",
                 "rewards_scope": "Q1 任務的 reward 設計預設，並非所有 Isaac Lab 任務的通用選項。",
             },
@@ -523,6 +528,124 @@ class Store:
                    "compatible_with_current_urdf": job["result"].get("compatible_with_current_urdf"),
                    "label": "示範上架 · 既有模擬影片 · 不收取費用"}
         return self.put("listings", listing)
+
+    def robot_contract(self, robot_type):
+        """Resolve the bundled contract without accepting caller-supplied model metadata."""
+        robot = next((r for r in self.catalog()["robots"] if r.get("id") == robot_type), None)
+        if not robot:
+            raise APIError("此機型的原生模型尚未同步。", 503)
+        sha = robot.get("urdf_sha256")
+        controls = robot.get("control_joints")
+        if (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)
+                or not isinstance(controls, list) or not controls
+                or any(not isinstance(name, str) for name in controls)):
+            raise APIError("此機型的 URDF／控制契約尚未完整。", 503)
+        urdf_path = (self.root / str(robot.get("urdf_url", "")).lstrip("/")).resolve()
+        if not urdf_path.is_relative_to(self.root / "assets/robots") or not urdf_path.is_file():
+            raise APIError("此機型的原生 URDF 檔案尚未同步。", 503)
+        if hashlib.sha256(urdf_path.read_bytes()).hexdigest() != sha:
+            raise APIError("原生 URDF 檔案與版本契約不一致，請重新同步。", 409)
+        return {"id": robot_type, "urdf_url": robot.get("urdf_url"), "urdf_sha256": sha,
+                "control_joints": controls, "default_joint_positions": robot.get("default_joint_positions", {}),
+                "joints": robot.get("joints", []), "source_repository": robot.get("repository"),
+                "source_commit": robot.get("commit")}
+
+    def register_robot(self, payload):
+        if not isinstance(payload, dict):
+            raise APIError("機器人註冊資料必須是 JSON object。")
+        robot_type, name, serial = payload.get("robot_type"), payload.get("name"), payload.get("serial")
+        if not isinstance(robot_type, str) or robot_type not in {"leg", "wheel"}:
+            raise APIError("註冊機型必須是 leg 或 wheel。")
+        if (not isinstance(name, str) or not 1 <= len(name.strip()) <= 60
+                or any(ord(char) < 32 for char in name)):
+            raise APIError("請輸入 1 至 60 字的機器人名稱。")
+        if not isinstance(serial, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", serial):
+            raise APIError("序號需為 1 至 80 個英數、點、冒號、底線或連字號。")
+        contract = self.robot_contract(robot_type)
+        with self.lock:
+            if any(r["serial"].casefold() == serial.casefold() for r in self.all("registered_robots")):
+                raise APIError("這個序號已註冊。", 409)
+            robot = {"id": uuid.uuid4().hex, "name": name.strip(), "robot_type": robot_type, "serial": serial,
+                     "urdf_sha256": contract["urdf_sha256"], "control_joints": contract["control_joints"],
+                     "source_commit": contract.get("source_commit"), "created_at": self.clock(),
+                     "connection_state": "not_connected", "hardware_delivery": False}
+            return self.put("registered_robots", robot)
+
+    @staticmethod
+    def package_json(value):
+        return (json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2, sort_keys=True) + "\n").encode()
+
+    def create_deployment(self, payload):
+        """Prepare an inert package addressed to a registered robot; never contact hardware."""
+        if not isinstance(payload, dict):
+            raise APIError("Deploy 內容必須是 JSON object。")
+        job = self.job(payload.get("job_id", ""))
+        if job.get("state") != "demo_complete" or not job.get("result"):
+            raise APIError("請先完成動作流程，再下載 Deploy 套件。", 409)
+        target = self.get("registered_robots", payload.get("robot_id", ""))
+        if target["robot_type"] != job["robot_type"]:
+            raise APIError("註冊機器人與訓練工作的 robot type 不一致。", 409)
+        contract = self.robot_contract(job["robot_type"])
+        job_sha = job.get("plan", {}).get("robot", {}).get("urdf_sha256")
+        if contract["urdf_sha256"] != target["urdf_sha256"] or contract["urdf_sha256"] != job_sha:
+            raise APIError("機器人、工作與目前 URDF 的版本不一致，請重新核對註冊及訓練工作。", 409)
+        if target["control_joints"] != contract["control_joints"]:
+            raise APIError("註冊機器人的控制關節契約已變更。", 409)
+        identifier = uuid.uuid4().hex
+        deployment = {"id": identifier, "job_id": job["id"], "robot_id": target["id"],
+                      "robot_type": job["robot_type"], "action_name": job.get("action_name", "Q1 Motion"),
+                      "target_robot": target, "urdf_sha256": contract["urdf_sha256"],
+                      "status": "package_ready", "package_kind": "preview_only", "transport": "browser_download",
+                      "deployable": False, "hardware_activation_allowed": False, "checkpoint_included": False,
+                      "device_acknowledged": False, "newly_trained": False, "created_at": self.clock(),
+                      "compatible_with_current_urdf": job["result"].get("compatible_with_current_urdf"),
+                      "download_url": "/api/deployments/" + identifier + "/download",
+                      "label": "Demo Deploy 套件；不含可執行策略，尚未傳送至機器人。"}
+        files = {"job-plan.json": self.package_json(job["plan"]),
+                 "robot-contract.json": self.package_json(contract)}
+        if job.get("motion_id"):
+            motion = self.get("motions", job["motion_id"])
+            if motion["robot_type"] != target["robot_type"] or motion["urdf_sha256"] != contract["urdf_sha256"]:
+                raise APIError("動作資料與部署機器人的模型不一致。", 409)
+            files["motion.json"] = self.package_json(motion)
+        files["README.txt"] = (
+            "Q1 Store Demo Deployment Package\n"
+            "Target: " + target["name"] + " / " + target["serial"] + "\n"
+            "This preview-only package contains no runnable PPO checkpoint or hardware commands.\n"
+            "Downloading it does not transfer or activate a policy on the registered robot.\n"
+            "A robot-side agent, a compatible verified policy artifact and device acknowledgment are not connected yet.\n"
+            "motion.json, when present, is an unvalidated geometric reference, not a control policy.\n"
+            "For future deployment, the robot agent must check the target identity, URDF hash, joint order, policy version and evaluation evidence.\n"
+            "The historical video and any legacy wheel policy are not included as a runnable checkpoint.\n"
+        ).encode()
+        manifest = dict(deployment)
+        manifest.update(schema="q1-store.deployment.v1", hardware_delivery=False,
+                        files=[{"path": name, "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
+                               for name, data in sorted(files.items())],
+                        result_provenance=job["result"].get("provenance"),
+                        required_integrations=["verified compatible policy artifact", "authenticated robot-side download agent", "device acknowledgment"])
+        files["manifest.json"] = self.package_json(manifest)
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, data in sorted(files.items()):
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, data)
+        content = stream.getvalue()
+        deployment.update(package_sha256=hashlib.sha256(content).hexdigest(), size_bytes=len(content))
+        (self.deployment_dir / (identifier + ".zip")).write_bytes(content)
+        return self.put("deployments", deployment)
+
+    def deployment_package(self, identifier):
+        deployment = self.get("deployments", identifier)
+        path = self.deployment_dir / (deployment["id"] + ".zip")
+        try:
+            content = path.read_bytes()
+        except OSError:
+            raise APIError("Deploy 套件已不存在，請重新建立。", 404)
+        if hashlib.sha256(content).hexdigest() != deployment.get("package_sha256"):
+            raise APIError("Deploy 套件完整性檢查失敗，請重新建立。", 409)
+        return deployment, content
 
     def purchase(self, payload):
         listing = self.get("listings", payload.get("listing_id", ""))
