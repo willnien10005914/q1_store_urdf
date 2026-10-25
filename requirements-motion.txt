@@ -1,0 +1,3 @@
+yt-dlp>=2026.8.19
+yt-dlp-ejs
+# Browser MediaPipe handles actual pose inference; no Python ML runtime is required.

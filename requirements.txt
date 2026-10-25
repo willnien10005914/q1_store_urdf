@@ -1,0 +1,2 @@
+# Base demo and persistence use the Python 3.10+ standard library.
+# Optional video extraction / YouTube support: pip install -r requirements-motion.txt

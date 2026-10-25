@@ -1,0 +1,104 @@
+name: Sync upstream native Q1 robots
+
+on:
+  workflow_dispatch:
+    inputs:
+      leg_ref:
+        description: 'Leg branch, tag or commit to snapshot'
+        default: 'spark/isaaclab3-balance-6144-15000'
+        required: true
+        type: string
+      wheel_ref:
+        description: 'Wheel branch, tag or commit to snapshot'
+        default: 'main'
+        required: true
+        type: string
+  schedule:
+    - cron: '23 3 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: q1-native-sync-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      Q1_LEG_REF: ${{ inputs.leg_ref || 'spark/isaaclab3-balance-6144-15000' }}
+      Q1_WHEEL_REF: ${{ inputs.wheel_ref || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch isolated source snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          Q1_SOURCE_ROOT="$RUNNER_TEMP/q1-store-sources"
+          mkdir -p "$Q1_SOURCE_ROOT"
+          fetch_source() {
+            local repository="$1" source_ref="$2"
+            local checkout="$Q1_SOURCE_ROOT/$repository"
+            git check-ref-format --allow-onelevel "$source_ref"
+            git init -q "$checkout"
+            git -C "$checkout" remote add origin "https://github.com/willnien10005914/$repository.git"
+            git -C "$checkout" config remote.origin.promisor true
+            git -C "$checkout" config remote.origin.partialclonefilter blob:none
+            git -C "$checkout" sparse-checkout init --no-cone
+            if [[ "$repository" == 'q1_leg_urdf' ]]; then
+              git -C "$checkout" sparse-checkout set --no-cone \
+                '/urdf/q1_inertia/' '/meshes/q1_inertia/' '/config/robot_contract.json' \
+                '/web/vendor/' '/web/store/assets/sidestep.jpg' \
+                '/docs/results/q1_leg_sidestep_6144_8000.mp4' \
+                '/docs/results/q1_leg_sidestep_6144_8000.json' \
+                '/docs/reference/sidestep_motion.json' '/docs/reference/sidestep_landmarks.json'
+            else
+              git -C "$checkout" sparse-checkout set --no-cone \
+                '/urdf/q1_inertia/' '/meshes/q1_inertia/' \
+                '/source/wheel_humanoid_lab/wheel_humanoid_lab/assets/q1_inertia.py' \
+                '/docs/results/q1_skate_cubemars_iter3800.mp4' \
+                '/docs/results/q1_skate_cubemars_iter3800_frames.png' '/checkpoints/q1_skate_ppo.pt'
+            fi
+            git -C "$checkout" fetch --filter=blob:none --depth 1 origin "$source_ref"
+            git -C "$checkout" checkout --detach FETCH_HEAD
+          }
+          fetch_source q1_leg_urdf "$Q1_LEG_REF"
+          fetch_source q1_wheel_urdf "$Q1_WHEEL_REF"
+          printf 'Q1_SOURCE_ROOT=%s\n' "$Q1_SOURCE_ROOT" >> "$GITHUB_ENV"
+      - name: Generate manifest, URDFs and examples
+        run: python3 scripts/sync_robots.py --source-root "$Q1_SOURCE_ROOT"
+      - name: Validate updated store
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 scripts/build_static.py
+      - name: Commit changed source snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          path = 'assets/robots/manifest.json'
+          previous = json.loads(subprocess.check_output(['git', 'show', 'HEAD:' + path]))
+          current = json.loads(Path(path).read_text())
+          previous.pop('synced_at', None)
+          current.pop('synced_at', None)
+          unchanged = subprocess.run(['git', 'diff', '--quiet', '--', 'assets/robots/leg',
+              'assets/robots/wheel', 'assets/examples', 'public/vendor']).returncode == 0
+          if previous == current and unchanged:
+              subprocess.run(['git', 'restore', '--', path], check=True)
+          PY
+          git add -- assets/robots assets/examples public/vendor
+          if git diff --cached --quiet; then
+            echo 'Upstream snapshots unchanged.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Sync Q1 native robot assets from upstream'
+          git push origin "HEAD:$GITHUB_REF_NAME"

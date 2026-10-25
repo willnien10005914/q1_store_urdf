@@ -1,0 +1,56 @@
+name: Q1 Store checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Backend behavior and HTTP isolation
+        run: python3 -m unittest discover -s tests -v
+      - name: Browser module syntax
+        shell: bash
+        run: |
+          for script in public/*.js; do
+            node --input-type=module --check < "$script"
+          done
+      - name: Native retarget constraints and target isolation
+        run: node tests/test_retarget.mjs
+      - name: Verify native assets and provenance
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, xml.etree.ElementTree as ET
+          from pathlib import Path
+          root = Path.cwd()
+          manifest = json.loads((root / 'assets/robots/manifest.json').read_text())
+          assert {robot['id'] for robot in manifest['robots']} == {'leg', 'wheel'}
+          for robot in manifest['robots']:
+              urdf = root / robot['urdf_url'].lstrip('/')
+              assert hashlib.sha256(urdf.read_bytes()).hexdigest() == robot['urdf_sha256']
+              for mesh in ET.parse(urdf).findall('.//mesh'):
+                  assert (urdf.parent / mesh.get('filename')).is_file()
+              for mesh in robot['meshes']:
+                  path = root / 'assets/robots' / robot['id'] / mesh['path']
+                  assert hashlib.sha256(path.read_bytes()).hexdigest() == mesh['sha256']
+              assert len(robot['control_joints']) == 23
+          for example in json.loads((root / 'assets/examples/catalog.json').read_text())['examples']:
+              for key in ('video_url', 'poster_url', 'motion_url', 'landmarks_url', 'evidence_url'):
+                  if example.get(key):
+                      assert (root / example[key].lstrip('/')).is_file()
+          print('Native URDF/mesh hashes, joint contracts and example assets verified.')
+          PY
+      - name: Build static demo
+        run: python3 scripts/build_static.py

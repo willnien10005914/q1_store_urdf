@@ -1,0 +1,11 @@
+{
+  "source": "Historical Isaac Sim PPO recording documented in upstream README.en.md",
+  "source_url": "https://github.com/willnien10005914/q1_wheel_urdf/blob/358c668e27a790b572fc18ca0bab63ce5f8ad9fa/README.en.md#results-run-skate_cubemars_4096_v2-4096-envs-stage-5-reached-at-iter-3400",
+  "checkpoint": "checkpoints/q1_skate_ppo.pt",
+  "iterations": 3800,
+  "video_sha256": "2606af4ddb95fb5bfdde9727dc9ef2ee8f14e250beaf9c3d38ee6d6d0d4a87aa",
+  "checkpoint_sha256": "0b36ba0a1a9198e89109a886b2812705c9bfbd2b3c8f98ea56ad3dbfa2252db0",
+  "contract": "legacy 24 actions / 92 actor observations",
+  "compatible_with_current_urdf": false,
+  "scope": "Historical recording uses the legacy wheel robot. It is not evidence of current native 23-action URDF compatibility."
+}

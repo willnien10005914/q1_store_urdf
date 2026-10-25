@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+runtime/
+node_modules/
+.playwright/
+*.log
+.env
+.openai/local*
+
+.data/
+dist/
