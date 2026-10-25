@@ -8,11 +8,11 @@ const browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-g
 try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
  page.on('pageerror',e=>errors.push(e.message));
- await page.goto(base);await page.locator('#people button').first().waitFor({timeout:30000});
+ await page.goto(base);await page.locator('#studio-viewer[data-model-ready="true"]').waitFor({timeout:30000});await page.locator('#load-example').click();await page.locator('#people button').first().waitFor({timeout:30000});
  assert.equal(await page.locator('#people button').count(),2);
  await page.locator('[data-robot="wheel"]').click();await page.waitForFunction(()=>{const e=document.querySelector('#studio-viewer');return e.dataset.modelReady==='true'&&e.dataset.robotType==='wheel';});
  await page.locator('[data-robot="leg"]').click();await page.waitForFunction(()=>{const e=document.querySelector('#studio-viewer');return e.dataset.modelReady==='true'&&e.dataset.robotType==='leg';});
- await page.locator('#people button').last().waitFor();await page.locator('#people button').last().click();await page.waitForFunction(()=>document.querySelector('#people button:last-child')?.getAttribute('aria-pressed')==='true');await page.waitForTimeout(800);
+ await page.locator('#load-example').click();await page.locator('#people button').last().waitFor();await page.locator('#people button').last().click();await page.waitForFunction(()=>document.querySelector('#people button:last-child')?.getAttribute('aria-pressed')==='true');await page.waitForTimeout(800);
  await page.locator('[data-next="training"]:visible').click();
  await page.selectOption('#rl-library','skrl');await page.selectOption('#physics-engine','newton_mjwarp');
  await page.locator('[data-next="world"]').click();await page.locator('[data-landmark="eiffel"]').click();
@@ -27,7 +27,7 @@ try{
  await page.locator('#share-form button').click();await page.locator('#community-cards .button').first().waitFor();
  const receiptResponse=page.waitForResponse(r=>r.url().endsWith('/api/purchases')&&r.request().method()==='POST');
  await page.locator('#community-cards .button').first().click();const receipt=await (await receiptResponse).json();assert.equal(receipt.charged_amount,0);
- await page.setViewportSize({width:390,height:844});await page.goto(base);await page.locator('#people button').first().waitFor();
+ await page.setViewportSize({width:390,height:844});await page.goto(base);await page.locator('#studio-viewer[data-model-ready="true"]').waitFor();
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  assert.deepEqual(errors,[]);console.log('Browser flow passed: dual URDF, coloured target, persisted motion, demo, video, share, no-charge receipt, mobile layout.');
 }finally{await browser.close();}

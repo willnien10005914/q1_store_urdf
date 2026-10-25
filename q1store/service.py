@@ -145,10 +145,13 @@ class Store:
         return {
             "robots": read_collection(self.root / "assets/robots/manifest.json", "robots"),
             "examples": read_collection(self.root / "assets/examples/catalog.json", "examples"),
+            "video_examples": read_collection(self.root / "assets/video-examples/catalog.json", "examples"),
+            "video_sources": read_collection(self.root / "assets/video-examples/catalog.json", "sources"),
             "capabilities": {
                 "libraries": LIBRARIES, "physics": PHYSICS, "rewards": REWARDS, "landmarks": LANDMARKS,
                 "demo_duration_s": DEMO_DURATION, "worker_available": False,
                 "youtube_ingest": bool(self.downloader), "upload": True, "motion_storage": True,
+                "video_segments": True, "segment_min_s": .5, "segment_max_s": 60,
                 "payments": "demo_only", "training": "demo_or_external_worker_manifest",
                 "physics_scope": "實際後端支援須由 Q1 task adapter 驗證；選單是訓練規劃。",
                 "rewards_scope": "Q1 任務的 reward 設計預設，並非所有 Isaac Lab 任務的通用選項。",
@@ -245,6 +248,7 @@ class Store:
         frames = payload.get("frames")
         if not isinstance(frames, list) or not 2 <= len(frames) <= MAX_MOTION_FRAMES:
             raise APIError("請先播放並錄製至少 2 個 frame；最多支援 18,000 個 frame。")
+        segment = self.normalize_segment(payload.get("segment")) if payload.get("segment") is not None else None
         previous_time = -1.0
         for index, frame in enumerate(frames):
             if not isinstance(frame, dict):
@@ -253,6 +257,12 @@ class Store:
             if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or not math.isfinite(timestamp) or not 0 <= timestamp <= 3600 or timestamp <= previous_time:
                 raise APIError("frame time 必須是 0 至 3600 秒內嚴格遞增的有限數值。")
             previous_time = timestamp
+            if "source_time" in frame and frame["source_time"] is not None:
+                source_time = frame["source_time"]
+                if isinstance(source_time, bool) or not isinstance(source_time, (int, float)) or not math.isfinite(source_time) or not 0 <= source_time <= 86400:
+                    raise APIError("source_time 必須是有效影片秒數。")
+                if segment and not segment["start_s"] - 1e-3 <= source_time <= segment["end_s"] + 1e-3:
+                    raise APIError("frame source_time 超出選取的影片片段。")
             q = frame.get("q")
             joints = frame.get("joints", {})
             if not isinstance(q, list) or len(q) != len(names) or not isinstance(joints, dict):
@@ -277,6 +287,8 @@ class Store:
         if len(json.dumps(metadata, ensure_ascii=False).encode()) > 32768:
             raise APIError("動作 mapping metadata 超過 32 KB。", 413)
         motion = dict(payload)
+        if segment:
+            motion["segment"] = segment
         motion.update(id=uuid.uuid4().hex, created_at=self.clock(), urdf_sha256=urdf_sha,
                       frame_count=len(frames), duration_s=round(frames[-1]["time"] - frames[0]["time"], 6),
                       physical_simulation=False,
@@ -291,6 +303,22 @@ class Store:
             raise APIError("請先選擇影片來源。")
         if not isinstance(source.get("type"), str):
             raise APIError("影片來源格式不正確。")
+        if source.get("type") == "video_example":
+            example = next((e for e in self.catalog()["video_examples"] if e.get("id") == source.get("id")), None)
+            if not example:
+                raise APIError("找不到分段影片範例。")
+            original_url = youtube_url(example.get("source_url", ""))
+            start, end = example.get("start_s"), example.get("end_s")
+            if (isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, (int, float))
+                    or not isinstance(end, (int, float)) or not math.isfinite(start) or not math.isfinite(end)
+                    or start < 0 or end <= start):
+                raise APIError("分段影片來源時間設定不正確。", 503)
+            return {"type": "video_example", "id": example["id"], "title": example.get("title", example["id"]),
+                    "robot_type": example.get("robot_type"), "url": example.get("video_url"),
+                    "source_url": original_url, "source_video_id": example.get("source_video_id"),
+                    "source_start_s": start, "source_end_s": end, "duration_s": end - start,
+                    "tracking_scope": example.get("tracking_scope", "robot_video_reference"),
+                    "requires_manual_review": True, "is_training_result": False}
         if source.get("type") == "example":
             if source.get("id") == "kungfu-demo":
                 return {"type": "example", "id": "kungfu-demo", "procedural": True,
@@ -307,6 +335,31 @@ class Store:
         if source.get("type") == "youtube":
             return {"type": "youtube", "url": youtube_url(source.get("url", "")), "downloaded": False}
         raise APIError("無效的影片來源。")
+
+    def normalize_segment(self, segment, source=None):
+        """Local playback bounds plus immutable original-source offsets for a worker."""
+        source = source or {}
+        duration = source.get("duration_s")
+        if segment is None:
+            if source.get("type") != "video_example":
+                return None
+            segment = {"start_s": 0, "end_s": duration}
+        if not isinstance(segment, dict):
+            raise APIError("segment 必須包含 start_s 和 end_s。")
+        start, end = segment.get("start_s"), segment.get("end_s")
+        if (isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, (int, float))
+                or not isinstance(end, (int, float)) or not math.isfinite(start) or not math.isfinite(end)):
+            raise APIError("片段起訖時間必須是有限秒數。")
+        if start < 0 or end > 86400 or not .5 <= end - start <= 60:
+            raise APIError("片段長度必須介於 0.5 至 60 秒，且起訖時間不可為負數或反向。")
+        if isinstance(duration, (int, float)) and end > duration + 1e-3:
+            raise APIError("所選片段超出可播放影片的長度。")
+        offset = source.get("source_start_s", 0)
+        return {"start_s": round(start, 6), "end_s": round(end, 6), "duration_s": round(end - start, 6),
+                "source_start_s": round(offset + start, 6), "source_end_s": round(offset + end, 6),
+                "timebase": "playable_video_seconds",
+                "source_timebase": "original_video_seconds" if source.get("type") == "video_example" else "playable_video_seconds",
+                "duration_verified": source.get("type") == "video_example"}
 
     def create_job(self, payload):
         if not isinstance(payload, dict):
@@ -350,31 +403,57 @@ class Store:
             raise APIError("輪速追蹤 reward 適用於雙輪。")
         config["rewards"] = list(dict.fromkeys(rewards))
         source = self.normalize_source(payload.get("source"))
+        if source.get("robot_type") and source["robot_type"] != robot:
+            raise APIError("影片範例與所選 robot type 不一致。")
+        segment = self.normalize_segment(payload.get("segment"), source)
         motion = None
         if payload.get("motion_id"):
             motion = self.get("motions", payload["motion_id"])
             if motion["robot_type"] != robot:
                 raise APIError("動作參考與所選 robot type 不一致。")
+            if motion.get("segment"):
+                if segment is None:
+                    segment = self.normalize_segment(motion["segment"], source)
+                elif any(abs(motion["segment"][key] - segment[key]) > 1e-6 for key in ("start_s", "end_s")):
+                    raise APIError("動作參考與所選影片片段不一致，請重新映射。")
+            if segment:
+                for frame in motion["frames"]:
+                    source_time = frame.get("source_time")
+                    if source_time is not None and not segment["start_s"] - 1e-3 <= source_time <= segment["end_s"] + 1e-3:
+                        raise APIError("動作參考含有所選影片片段之外的 frame，請重新映射。")
             current_robot = next((r for r in self.catalog()["robots"] if r.get("id") == robot), {})
             if current_robot.get("urdf_sha256") and current_robot["urdf_sha256"] != motion["urdf_sha256"]:
                 raise APIError("動作參考對應的 URDF 已更新，請重新錄製。", 409)
         target = payload.get("target_person", {"id": 0, "color": "#42a5ff"})
         if not isinstance(target, (dict, int, str)):
             raise APIError("人物目標格式不正確。")
+        action_name = payload.get("action_name", source.get("title", "Q1 Motion"))
+        if not isinstance(action_name, str) or not 1 <= len(action_name.strip()) <= 80:
+            raise APIError("動作名稱必須為 1 至 80 字。")
+        action_name = action_name.strip()
         now = self.clock()
         job = {"id": uuid.uuid4().hex, "robot_type": robot, "mode": mode, "source": source,
-               "target_person": target, "config": config, "created_at": now,
+               "target_person": target, "config": config, "action_name": action_name, "created_at": now,
                "state": "queued_for_worker" if mode == "worker" else "retargeting", "progress": 0,
                "result": None, "is_demo": mode == "demo", "newly_trained": False,
                "label": "概念流程示範；不執行 PPO" if mode == "demo" else "等待外部 Isaac Lab 3 worker",
                "plan": self.worker_plan(robot, config, source, target)}
         job["plan"]["job_id"] = job["id"]
+        job["plan"]["action_name"] = action_name
+        job["plan"]["motion_extraction_ready"] = bool(motion and not motion.get("demo", False))
+        if segment:
+            job["segment"] = segment
+            job["plan"]["segment"] = dict(segment)
+        if source.get("type") == "video_example":
+            job["plan"]["reference_scope"] = "機器人影片分段參考；MediaPipe 為人體模型，辨識結果必須人工檢查，不代表 Q1 新策略已訓練。"
         if motion:
             job["motion_id"] = motion["id"]
             job["plan"]["motion"] = {key: motion[key] for key in ("id", "url", "robot_type", "frame_count", "duration_s", "urdf_sha256", "validation")}
             job["plan"]["motion"]["source"] = motion.get("source")
             job["plan"]["motion"]["mapping"] = motion.get("mapping")
             job["plan"]["motion"]["demo"] = motion.get("demo")
+            if motion.get("segment"):
+                job["plan"]["motion"]["segment"] = motion["segment"]
         self.put("jobs", job)
         return self.job(job["id"])
 

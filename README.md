@@ -10,7 +10,44 @@ marketplace. It does not train a new PPO policy or charge payments.
 
 ![Q1 Store 雙機型創作工作室](docs/images/store-home.png)
 
-![功夫範例：選機型、彩色人物追蹤、關節映射、訓練設計與成果分享](docs/images/kungfu-workflow.gif)
+## 指定影片：分段建立 Q1 Leg／Wheel 動作
+
+雙足使用 [Unitree H2-X 功夫影片](https://youtu.be/Y3zb4o47yqA)，雙輪使用
+[AgiBot X2-N 影片](https://youtu.be/TV6ctYnA9Io)。工作室已附下列五個靜音短片，
+可直接播放、調整起訖、命名並建立各自的訓練工作，不必重新下載 YouTube。
+原影片展示的是 H2-X／X2-N；以下短片與 GIF 是**來源參考**，不是 Q1 新訓練的成果。
+
+**Q1 Leg 操作：選功夫片段 → 再分段／命名 → 保存動作 → 設計訓練 → 工作計畫。**
+
+![使用 H2-X 功夫來源影片建立 Q1 Leg 分段訓練計畫](docs/images/leg-video-training.gif)
+
+**Q1 Wheel 操作：選 X2-N 片段 → 切分斜坡／轉向動作 → 設計雙輪訓練。**
+
+![使用 X2-N 來源影片建立 Q1 Wheel 分段訓練計畫](docs/images/wheel-video-training.gif)
+
+| 目標機型與動作 | 原 YouTube 時間／短片時間 | 原片節錄 GIF |
+| --- | --- | --- |
+| Leg · 護架與跨步 | 00:33–00:36／0–3 s | ![H2-X 護架與跨步參考](assets/video-examples/leg/h2x-guard.gif) |
+| Leg · 側身出拳 | 00:36–00:39／0–3 s | ![H2-X 側身出拳參考](assets/video-examples/leg/h2x-punch.gif) |
+| Leg · 轉身踢腿 | 00:39–00:41.8／0–2.8 s | ![H2-X 轉身踢腿參考](assets/video-examples/leg/h2x-turn-kick.gif) |
+| Wheel · 斜坡通行 | 00:24–00:28／0–4 s | ![X2-N 斜坡通行參考](assets/video-examples/wheel/x2-slope.gif) |
+| Wheel · 坡頂轉向 | 00:37–00:40.4／0–3.4 s | ![X2-N 坡頂轉向參考](assets/video-examples/wheel/x2-turn.gif) |
+
+片段欄位以**目前短片的相對秒數**為基準；畫面與工作 JSON 同時保存原 YouTube 的
+絕對時間。例如 `h2x-guard` 再選 `0.4–2.6 s`，對應原片 `33.4–35.6 s`。
+同一來源可加入多個命名動作；草稿保存片段與名稱，各工作可另外選擇 reward、引擎與時數。
+
+MediaPipe Pose 是人體姿態模型；H2-X 實測曾偵測到背景人物，候選數不代表辨識到機器人。
+對這兩支機器人來源，介面先顯示**候選並暫停影片**，不會自動選取；只有使用者核對來源機器人後
+明確選取，才開始輸出關節。若只有背景人物，請留空並保存**待提取參考動作的訓練計畫**，
+交由機器人專用 tracker 或人工標記補足。Wheel 另需輪速、車身運動與接觸 reference。
+
+目前可完成影片分段與訓練規劃 demo；**全自動機器人影片 → Q1 PPO 尚未實作，也沒有產生新權重**。
+不會以背景人物或程序化骨架冒充來源機器人的 retargeting。
+
+完整步驟、時間欄位與重新產生剪輯的指令見
+[影片分段訓練教學](docs/VIDEO_TRAINING_EXAMPLES.md)。
+[原程序化骨架操作 GIF](docs/images/kungfu-workflow.gif) 仍保留作離線多人選取練習。
 
 [實際驗證紀錄](docs/VALIDATION.md) · [工作室截圖](docs/images/store-studio.png) · [成果頁截圖](docs/images/store-result.png)
 
@@ -19,9 +56,10 @@ marketplace. It does not train a new PPO policy or charge payments.
 | 功能 | 狀態與實際行為 |
 | --- | --- |
 | 雙足／雙輪原生 URDF | 可操作。載入各自 CAD meshes、關節名稱、限位與 mimic。可拖曳旋轉。 |
-| 功夫範例 | 可操作。兩位程序化骨架示範彩色人物選取與即時關節映射；不是影片辨識，也不是新 PPO。 |
+| 指定影片／分段動作 | 可操作。H2-X → Leg、X2-N → Wheel 共五個真實來源短片；可設定起訖、命名、保存多個動作片段及建立獨立工作。 |
+| 程序化骨架示範 | 保留為離線多人選取與映射練習；不是指定影片的辨識結果，也不是新 PPO。 |
 | 使用者影片 | 可操作。MP4／WebM／MOV 等瀏覽器可解碼影片，MediaPipe 在瀏覽器辨識最多 4 位人物；依顏色選取目標。 |
-| 真實 retargeting | 可操作。人物姿態映射到所選原生關節，限制角度並匯出 JSON；是幾何參考，未做逆動力學、接觸或平衡驗收。 |
+| 人體影片 retargeting | 可操作。人物姿態映射到所選原生關節，限制角度並匯出 JSON；是幾何參考，未做逆動力學、接觸或平衡驗收。機器人影片需先核對及明確選取候選。 |
 | YouTube | 可嵌入預覽。本機選裝 yt-dlp 可取得影片後辨識；iframe 本身不能提供跨來源影格。受限影片下載失敗會明示，不以範例替代辨識。 |
 | RL／physics／rewards／時數 | 可選擇並保存工作規劃；Q1 的 Isaac Lab 3 task adapter 尚未接入。 |
 | 地標舞台 | 可選台北 101、艾菲爾鐵塔、時代廣場、澀谷、萬里長城。3D 畫面是概念輪廓；尚無地標 USD／RTX 實錄。 |
@@ -66,12 +104,15 @@ Q1_YTDLP="$PWD/.venv/bin/yt-dlp" Q1_STORE_PYTHON=.venv/bin/python bash scripts/s
 下載限制、登入／地區與網站變更仍可能造成失敗，此時可上傳有權使用的影片。
 YouTube 嵌入播放器只能預覽；要執行 MediaPipe，必須取得可讀影格的實際影片檔。
 
-## 功夫示範操作
+## 影片分段訓練操作
 
-1. 在 Motion Studio 選擇 **雙足 Biped** 或 **雙輪 Wheeled**。
-2. 載入 **功夫範例**，點選綠色或紫色人物 chip，觀察右側原生模型即時映射。
-   要處理真實影片，改選 **上傳影片**，播放後按 **開始辨識**，再依顏色選取人物。
-3. 可下載關節 JSON；資料包含機型、URDF 雜湊、人物與影格。
+1. 在 Motion Studio 選擇 **雙足 Biped** 或 **雙輪 Wheeled**，開啟 **影片範例**。
+2. 選擇 H2-X 的護架／出拳／踢腿，或 X2-N 的斜坡／轉向短片。
+   設定短片的起點、終點與**動作名稱**，按 **預覽這一段** 核對；片段長度為 0.5–60 秒。
+3. 按 **加入動作清單**，可再切另一段、另取名稱；每個草稿以 **繼續設定** 建立自己的工作。
+   草稿存在瀏覽器，不是 PPO 權重。需要實際姿態時，回到影片頁按 **開始辨識**，
+   機器人來源不會自動選取候選；確認確實為來源機器人後才選取及輸出關節，再下載 JSON。
+   若只有背景人物請保留未選取，建立參考工作；改片段、來源或人物後需重新辨識。
 4. 選擇 **RSL-RL、skrl、RL-Games、Stable-Baselines3 或 TorchRL**，以及
    **Isaac Sim PhysX、Newton MuJoCo Warp 或 OV PhysX**。這些是規劃選項，
    實際支援組合需由註冊後的 Q1 task 驗證。
@@ -80,6 +121,8 @@ YouTube 嵌入播放器只能預覽；要執行 MediaPipe，必須取得可讀�
 6. 設定 **1–24 小時**訓練預算、選擇地標，再開始 **30 秒概念 demo**。
    時數是預算設定，不是成果保證；**匯出真實訓練計畫**只建立待 worker 的工作。
 7. 完成後觀看對應機型的歷史參考影片、下載工作 JSON、分享至市集並模擬收藏／購買。
+   本機 `.data/` 工作記錄包含片段 ID（`source.id`）、`action_name`、`segment` 與原片絕對時間。
+   計畫的 `motion_extraction_ready` 表示是否已有非程序化 capture，不表示人物、機器人映射或物理品質已驗證。
 
 單鏡頭映射沒有真實尺度與完整遮擋資訊；人物交叉、遮擋或離開畫面可能造成追蹤中斷。
 此處的色彩是追蹤 ID，不代表衣服辨識。幾何預覽不可直接當作實機控制策略。

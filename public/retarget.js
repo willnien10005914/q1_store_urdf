@@ -68,9 +68,19 @@ function demoLandmarks(t,offset=0){
   return p;
 }
 
+/** Validate local playable-video bounds; original YouTube offsets belong to source metadata. */
+export function normalizeVideoSegment(segment,duration){
+  if(!segment||typeof segment!=='object'||Array.isArray(segment))throw new Error('請選擇影片片段的起訖時間。');
+  const {start_s,end_s}=segment;
+  if(typeof start_s!=='number'||typeof end_s!=='number'||!Number.isFinite(start_s)||!Number.isFinite(end_s))throw new Error('片段時間必須是有限秒數。');
+  if(!Number.isFinite(duration)||duration<=0)throw new Error('請先載入可播放的影片與長度。');
+  if(start_s<0||end_s-start_s<.5-1e-8||end_s-start_s>60+1e-8||end_s>duration+1e-6)throw new Error('請選擇影片內0.5至60秒的有效片段。');
+  return {start_s,end_s:Math.min(end_s,duration)};
+}
+
 /** Multi-person tracking with a stable colour per nearest-hip track. Explicit demo mode is procedural. */
-export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=()=>{},onStatus=()=>{}}){
-  const ctx=overlay.getContext('2d');let running=false,raf=0,lastInference=-Infinity,lastVideo=-1,detector=null,selected=null,tracks=[],nextTrack=0,frames=[],robot='leg',demo=false,startAt=0,captureStartAt=0,session=0,smoothed={};
+export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=()=>{},onStatus=()=>{},poseDetector=null}){
+  const ctx=overlay.getContext('2d');let running=false,raf=0,lastInference=-Infinity,lastVideo=-1,detector=poseDetector,selected=null,tracks=[],nextTrack=0,frames=[],robot='leg',demo=false,startAt=0,captureStartAt=0,session=0,smoothed={},segment=null,originalLoop=null,requireTargetSelection=false;
   function selectTarget(id){if(id!==selected){selected=id;frames=[];smoothed={};captureStartAt=performance.now();}}
   function size(){const r=overlay.getBoundingClientRect();overlay.width=Math.max(1,Math.round(r.width*devicePixelRatio));overlay.height=Math.max(1,Math.round(r.height*devicePixelRatio));}
   function draw(people){
@@ -94,27 +104,37 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
       const p=landmarks[index],hip={x:(p[23].x+p[24].x)/2,y:(p[23].y+p[24].y)/2};
       let best=null,distance=.21;
       for(const track of remaining){if(used.has(track.id))continue;const d=Math.hypot(hip.x-track.hip.x,hip.y-track.hip.y);if(d<distance){distance=d;best=track;}}
-      if(!best){const n=nextTrack++;best={id:'person-'+n,color:COLORS[n%COLORS.length],label:'人物 '+(n+1)};}
+      if(!best){const n=nextTrack++;best={id:'person-'+n,color:COLORS[n%COLORS.length],label:(requireTargetSelection?'候選 ':'人物 ')+(n+1)};}
       used.add(best.id);people.push({...best,index,hip,seen:now,landmarks:p,world:worlds[index],confidence:p.reduce((s,v)=>s+(v.visibility??1),0)/p.length});
     }
     tracks=people.concat(remaining.filter(t=>!used.has(t.id)));
-    if(selected===null&&people.length)selectTarget(people[0].id);
+    if(selected===null&&people.length&&!requireTargetSelection)selectTarget(people[0].id);
     return people;
   }
   function deliver(people,t){
     onPeople(people.map(({id,index,color,label,confidence})=>({id,index,color,label,confidence,selected:id===selected})));
     draw(people);const target=people.find(p=>p.id===selected);
-    if(!target){onStatus('選取的目標暫時離開畫面；暫停輸出關節。');return;}
+    if(!target){
+      if(requireTargetSelection&&selected===null&&people.length)video.pause();
+      onStatus(requireTargetSelection&&selected===null?(people.length?'影片已暫停 · 請確認來源機器人並點選候選目標繼續；若只有背景人物，可保留為參考工作。':'等待來源機器人的候選姿態；尚未選取目標，不輸出關節。'):'選取的目標暫時離開畫面；暫停輸出關節。');return;
+    }
     const raw=mapLandmarks(target.landmarks,robot),joints={};
     for(const [k,v]of Object.entries(raw)){smoothed[k]=(smoothed[k]??v)*.55+v*.45;joints[k]=smoothed[k];}
     const payload={time:t,captured_time:(performance.now()-captureStartAt)/1000,joints,person:target.id,landmarks:target.landmarks,confidence:target.confidence,demo};
     if(frames.length<18000)frames.push(payload);
     onFrame(payload);
   }
+  function finishSegment(){
+    running=false;cancelAnimationFrame(raf);video.pause();if(originalLoop!==null){video.loop=originalLoop;originalLoop=null;}
+    onStatus(requireTargetSelection&&selected===null?'片段檢視完成 · 沒有已確認的來源機器人；可保留片段交由專用追蹤 adapter 核對。':frames.length>=2?'片段辨識完成 · '+frames.length+'個影格；請檢查追蹤目標與關節映射。':'片段辨識完成 · 有效影格不足2個；請重選目標，或以人工標記／機器人追蹤 adapter 建立參考。');
+  }
   function tick(now){
-    if(!running)return;raf=requestAnimationFrame(tick);
+    if(!running)return;
+    if(!demo&&segment&&(video.currentTime>=segment.end_s||video.ended)){finishSegment();return;}
+    raf=requestAnimationFrame(tick);
     if(now-lastInference<90)return;
     if(!demo&&(video.readyState<2||video.paused||video.currentTime===lastVideo))return;
+    if(!demo&&segment&&video.currentTime<segment.start_s)return;
     lastInference=now;lastVideo=video.currentTime;
     try{
       if(demo){
@@ -126,13 +146,25 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
       else{const result=detector.detectForVideo(video,now);deliver(identify(result.landmarks,result.worldLandmarks),video.currentTime);}
     }catch(error){stop();onStatus('MediaPipe 偵測停止：'+error.message);}
   }
-  function stop(){running=false;session++;cancelAnimationFrame(raf);ctx.clearRect(0,0,overlay.width,overlay.height);return api;}
+  function stop(){running=false;session++;cancelAnimationFrame(raf);if(originalLoop!==null){video.loop=originalLoop;originalLoop=null;}ctx.clearRect(0,0,overlay.width,overlay.height);return api;}
   function resetCapture(){
-    stop();frames=[];selected=null;tracks=[];nextTrack=0;smoothed={};demo=false;
+    stop();frames=[];selected=null;tracks=[];nextTrack=0;smoothed={};demo=false;segment=null;requireTargetSelection=false;
     lastVideo=-1;lastInference=-Infinity;startAt=captureStartAt=performance.now();onPeople([]);return api;
   }
+  async function seekToStart(){
+    if(!segment||Math.abs(video.currentTime-segment.start_s)<.001)return;
+    if(typeof video.addEventListener!=='function'){video.currentTime=segment.start_s;return;}
+    await new Promise((resolve,reject)=>{
+      const timeout=setTimeout(()=>finish(new Error('影片定位逾時，請重新載入影片。')),8000);
+      function finish(error){clearTimeout(timeout);video.removeEventListener('seeked',done);video.removeEventListener('error',failed);error?reject(error):resolve();}
+      const done=()=>finish(),failed=()=>finish(new Error('無法定位影片片段。'));
+      video.addEventListener('seeked',done,{once:true});video.addEventListener('error',failed,{once:true});video.currentTime=segment.start_s;
+    });
+  }
   async function start(options={}){
-    stop();const token=++session;demo=options.demo===true;robot=options.robot||robot;tracks=[];selected=null;frames=[];nextTrack=0;smoothed={};lastVideo=-1;lastInference=-Infinity;
+    stop();const token=++session;demo=options.demo===true;requireTargetSelection=!demo&&options.requireTargetSelection===true;robot=options.robot||robot;tracks=[];selected=null;frames=[];nextTrack=0;smoothed={};lastVideo=-1;lastInference=-Infinity;
+    segment=!demo&&options.segment?normalizeVideoSegment(options.segment,video.duration):null;
+    if(!demo){if(video.readyState<2)throw new Error('請先載入可播放的影片。');video.pause();if(segment){originalLoop=video.loop;video.loop=false;}}
     if(!demo&&!detector){
       onStatus('正在載入 MediaPipe Pose Landmarker（首次需要網路）…');
       try{
@@ -142,16 +174,24 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
       }catch(error){onStatus('MediaPipe 載入失敗，請檢查網路後重試。'+error.message);throw error;}
     }
     if(token!==session)return api;
-    if(!demo){if(video.readyState<2)throw new Error('請先載入可播放的影片。');await video.play();}
+    if(!demo){await seekToStart();if(token!==session)return api;await video.play();}
     running=true;startAt=captureStartAt=performance.now();onStatus(demo?'功夫動作示意 · 程序化骨架，非影片辨識結果':'MediaPipe 即時辨識 · 點選顏色追蹤目標');raf=requestAnimationFrame(tick);return api;
   }
-  const api={start,stop,resetCapture,selectPerson(id){selectTarget(id);return api;},setRobot(value){robot=value;smoothed={};return api;},getFrames(){return frames.slice();},
+  const api={start,stop,resetCapture,selectPerson(id){
+    selectTarget(id);
+    if(running&&requireTargetSelection&&video.paused){
+      // Pausing for human review must not expire the candidate's tracking identity.
+      const now=performance.now(),token=session,targetId=selected;tracks=tracks.map(track=>({...track,seen:now}));
+      Promise.resolve(video.play()).then(()=>{if(running&&session===token&&selected===targetId)onStatus('已選取候選目標 · 繼續片段辨識，請核對來源機器人與關節映射。');}).catch(error=>{if(running&&session===token)onStatus('目標已選取，請按播放繼續辨識：'+error.message);});
+    }
+    return api;
+  },setRobot(value){robot=value;smoothed={};return api;},getFrames(){return frames.slice();},
     async exportMotion(value=robot){
       const robotType=typeof value==='string'?value:value.id;
       const targetFrames=frames.filter(f=>f.person===selected),origin=targetFrames[0]?.captured_time??0;
       const mapped=targetFrames.map(f=>({time:f.captured_time-origin,source_time:f.time,person:f.person,confidence:f.confidence,joints:mapLandmarks(f.landmarks,value)}));
       const jointNames=typeof value==='object'&&value.joints?value.joints.filter(j=>j.type!=='fixed').map(j=>j.name):Object.keys(mapped[0]?.joints||{});
-      return {schema:1,source:demo?'procedural_kungfu_demo':'mediapipe_pose_landmarker',robot_type:robotType,urdf_sha256:typeof value==='object'?value.urdf_sha256:undefined,target_person:selected,demo,physical_simulation:false,mapping:{method:'geometric_native_axes_v1',joint_limits_enforced:typeof value==='object',native_mimic_constraints:true,root_motion:false,wheel_policy:'stationary_reference',physical_validation:false},description:'Geometric retarget reference only; requires dynamics, contact, balance and task validation before training.',joint_names:jointNames,frames:mapped.map(f=>({...f,q:jointNames.map(name=>f.joints[name]??(typeof value==='object'?value.default_joint_positions?.[name]:0)??0)}))};
+      return {schema:1,source:demo?'procedural_kungfu_demo':'mediapipe_pose_landmarker',robot_type:robotType,urdf_sha256:typeof value==='object'?value.urdf_sha256:undefined,target_person:selected,demo,...(segment?{segment:{...segment}}:{}),physical_simulation:false,mapping:{method:'geometric_native_axes_v1',joint_limits_enforced:typeof value==='object',native_mimic_constraints:true,root_motion:false,wheel_policy:'stationary_reference',physical_validation:false},description:'Geometric retarget reference only; requires dynamics, contact, balance and task validation before training.',joint_names:jointNames,frames:mapped.map(f=>({...f,q:jointNames.map(name=>f.joints[name]??(typeof value==='object'?value.default_joint_positions?.[name]:0)??0)}))};
     },dispose(){stop();detector?.close();detector=null;}};
   return api;
 }

@@ -2,7 +2,7 @@
 
 2026-10-25，以 Chromium 與本機 Python API 實際操作。
 
-- Python 標準函式庫後端：13 項 unittest 通過，涵蓋上傳、來源檢查、motion 限位／時間驗證、持久化、取消、HTTP 隔離、MP4 range 與零收款交易。
+- Python 標準函式庫後端：17 項 unittest 通過，涵蓋上傳、來源檢查、motion 限位／時間驗證、持久化、取消、HTTP 隔離、MP4 range 與零收款交易。
 - 原生關節 fixture：左右肩軸、URDF 限位、遞迴 mimic、人物隔離、來源重設、單調時間與 q 一致性通過。
 - 雙 viewer 同時載入：完整 Leg 30／Wheel 28 個 meshes，座標有限，原生可動關節為 29／27，各 23 個控制軸。
 - 真實影片：MediaPipe 實際辨識一位人物，匯出 26 frames／29 joints／5.8735 秒，source=`mediapipe_pose_landmarker`、demo=false。動作經 API 保存／讀回，並建立維持 queued_for_worker 的工作。
@@ -17,3 +17,15 @@
 本次沒有執行新的 PPO／Isaac Sim 地標 RTX 訓練錄影。真實 GPU worker、Q1 Lab 3 task adapter 與付款服務仍依 README 所列範圍待接入。
 
 GitHub Actions 因現有 token 缺少 workflow scope，範本保存在 docs/github-workflows/，尚未啟用；本機驗證均已執行。
+
+## 指定影片分段範例
+
+- 兩支指定來源的五個短片、JPG、GIF 均已解碼／雜湊驗證，完整原片未納入 Git。
+- H2-X：護架跨步 33–36 s、側身出拳 36–39 s、轉身踢腿 39–41.8 s。
+- X2-N：斜坡 24–28 s、坡頂轉向 37–40.4 s。
+- API 與瀏覽器：分段命名、多草稿、重載保存、機型匹配、0.5–60 s 邊界與原片時間碼通過。
+- Leg `.25–2.5 s` 對應原片 `33.25–35.5 s`；Wheel `.2–3.4 s` 對應 `24.2–27.4 s`。工作保持等待 worker，沒有虛構 motion 或新模型。
+- 靜態 API 亦保留時間碼、URDF hash／23 軸契約；程序化 motion 不會被標示為真實提取就緒。
+- MediaPipe 實測會偵測 H2-X 背景人物；候選影格數不代表來源機器人辨識正確。指定機器人來源已改為先暫停、手動核對，未選取時不輸出關節。Fixture 驗證暫停、長時間檢視、選取後續播與 capture 邊界。
+- [Leg 操作 GIF](images/leg-video-training.gif)、[Wheel 操作 GIF](images/wheel-video-training.gif) 皆由實際瀏覽器操作錄影產生，無 JavaScript page errors；呈現分段與訓練規劃 demo，成果仍為歷史 PPO 影片。
+- 新分段介面於 390px 無橫向溢出；全自動機器人影片 → Q1 PPO 與新訓練權重仍未實作。

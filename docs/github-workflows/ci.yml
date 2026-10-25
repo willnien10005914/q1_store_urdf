@@ -28,7 +28,9 @@ jobs:
             node --input-type=module --check < "$script"
           done
       - name: Native retarget constraints and target isolation
-        run: node tests/test_retarget.mjs
+        run: |
+          node tests/test_retarget.mjs
+          node tests/test_clips.mjs
       - name: Verify native assets and provenance
         run: |
           python3 - <<'PY'

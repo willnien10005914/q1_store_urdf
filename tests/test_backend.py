@@ -23,6 +23,13 @@ class StoreTests(unittest.TestCase):
             {"id": "leg-example", "robot_type": "leg", "title": "Leg PPO", "video_url": "/assets/examples/leg.mp4", "provenance": "historical leg repo"},
             {"id": "wheel-example", "robot_type": "wheel", "title": "Wheel PPO", "video_url": "/assets/examples/wheel.mp4", "provenance": "historical wheel repo"},
         ]))
+        (self.root / "assets/video-examples").mkdir(parents=True)
+        (self.root / "assets/video-examples/catalog.json").write_text(json.dumps({"examples": [
+            {"id": "leg-punch", "robot_type": "leg", "title": "H2-X punch", "source_url": "https://youtu.be/Y3zb4o47yqA",
+             "source_video_id": "Y3zb4o47yqA", "start_s": 12, "end_s": 18, "video_url": "/assets/video-examples/leg-punch.mp4"},
+            {"id": "wheel-turn", "robot_type": "wheel", "title": "X2 turn", "source_url": "https://youtu.be/TV6ctYnA9Io",
+             "source_video_id": "TV6ctYnA9Io", "start_s": 45, "end_s": 50, "video_url": "/assets/video-examples/wheel-turn.mp4"},
+        ], "sources": [{"id": "Y3zb4o47yqA", "url": "https://youtu.be/Y3zb4o47yqA"}]}))
         (self.root / "assets/robots/leg").mkdir(parents=True)
         urdf = b'<robot name="test"><joint name="hip" type="revolute"><limit lower="-1" upper="1"/></joint><joint name="fixed" type="fixed"/></robot>'
         (self.root / "assets/robots/leg/native.urdf").write_bytes(urdf)
@@ -117,6 +124,72 @@ class StoreTests(unittest.TestCase):
         for bad in bad_values:
             with self.subTest(bad=bad), self.assertRaises(APIError):
                 self.store.create_job(self.payload(**bad))
+
+    def test_video_example_catalog_and_segment_plan_preserve_original_offsets(self):
+        catalog = self.store.catalog()
+        self.assertEqual(len(catalog["video_examples"]), 2)
+        self.assertEqual(catalog["video_sources"][0]["id"], "Y3zb4o47yqA")
+        job = self.store.create_job(self.payload(source={"type": "video_example", "id": "leg-punch"},
+            segment={"start_s": 1.25, "end_s": 4.5}, action_name="H2-X left punch", mode="worker"))
+        self.assertEqual(job["action_name"], "H2-X left punch")
+        self.assertEqual(job["plan"]["action_name"], job["action_name"])
+        self.assertEqual(job["segment"]["start_s"], 1.25)
+        self.assertEqual(job["segment"]["source_start_s"], 13.25)
+        self.assertEqual(job["segment"]["source_end_s"], 16.5)
+        self.assertEqual(job["plan"]["segment"], job["segment"])
+        self.assertEqual(job["source"]["source_url"], "https://www.youtube.com/watch?v=Y3zb4o47yqA")
+        self.assertEqual(job["source"]["tracking_scope"], "robot_video_reference")
+        self.assertFalse(job["source"]["is_training_result"])
+        self.assertFalse(job["plan"]["motion_extraction_ready"])
+        self.now += 100000
+        self.assertEqual(self.store.job(job["id"])["state"], "queued_for_worker")
+        self.assertIsNone(self.store.job(job["id"])["result"])
+
+    def test_video_example_default_segment_and_robot_mismatch(self):
+        source = {"type": "video_example", "id": "wheel-turn"}
+        job = self.store.create_job(self.payload("wheel", source=source))
+        self.assertEqual((job["segment"]["start_s"], job["segment"]["end_s"]), (0, 5))
+        self.assertEqual(job["segment"]["source_start_s"], 45)
+        with self.assertRaises(APIError):
+            self.store.create_job(self.payload("leg", source=source))
+        self.now += 31
+        self.assertFalse(self.store.job(job["id"])["result"]["newly_trained"])
+
+    def test_segment_and_action_name_validation_rejects_invalid_or_out_of_clip_bounds(self):
+        for segment in [{"start_s": 0, "end_s": .49}, {"start_s": 0, "end_s": 61},
+                        {"start_s": -1, "end_s": 2}, {"start_s": 5, "end_s": 2},
+                        {"start_s": True, "end_s": 2}, {"start_s": "0", "end_s": 2},
+                        {"start_s": 0, "end_s": float("inf")}, {"start_s": 0}, [],
+                        {"start_s": 5, "end_s": 7}]:
+            with self.subTest(segment=segment), self.assertRaises(APIError):
+                self.store.create_job(self.payload(source={"type": "video_example", "id": "leg-punch"}, segment=segment))
+        for name in ["", "  ", 3, "x" * 81]:
+            with self.subTest(name=name), self.assertRaises(APIError):
+                self.store.create_job(self.payload(action_name=name))
+        # Uploaded duration is unknown: bounds are saved explicitly without claiming probing.
+        upload = self.store.save_upload("motion.mp4", b"0000ftyp" + b"x" * 20)
+        job = self.store.create_job(self.payload(source={"type": "upload", "id": upload["id"]},
+            segment={"start_s": 2, "end_s": 8}))
+        self.assertFalse(job["segment"]["duration_verified"])
+
+    def test_motion_and_job_segment_must_agree_and_all_source_frames_stay_in_segment(self):
+        motion = self.motion()
+        motion["segment"] = {"start_s": 2, "end_s": 3}
+        saved = self.store.create_motion(motion)
+        job = self.store.create_job(self.payload(source={"type": "video_example", "id": "leg-punch"},
+            segment={"start_s": 2, "end_s": 3}, motion_id=saved["id"]))
+        self.assertTrue(job["plan"]["motion_extraction_ready"])
+        self.assertEqual(job["plan"]["segment"]["source_start_s"], 14)
+        self.assertEqual(job["plan"]["motion"]["segment"]["start_s"], 2)
+        with self.assertRaises(APIError):
+            self.store.create_job(self.payload(motion_id=saved["id"], segment={"start_s": 1, "end_s": 3}))
+        motion["frames"][1]["source_time"] = 3.1
+        with self.assertRaises(APIError):
+            self.store.create_motion(motion)
+        raw_motion = self.motion()
+        raw_motion["frames"][1]["source_time"] = "2.1"
+        with self.assertRaises(APIError):
+            self.store.create_motion(raw_motion)
 
     def test_youtube_url_is_canonical_and_rejects_arbitrary_network_targets(self):
         self.assertEqual(youtube_url("https://youtu.be/abcdefghijk?t=4"), "https://www.youtube.com/watch?v=abcdefghijk")

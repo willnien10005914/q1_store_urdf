@@ -1,3 +1,4 @@
+import {validateSegment} from './clip-editor.js';
 /** Native Python API when available; explicit browser-local demo on static hosting. */
 let local=false,catalog;
 const key='q1-store-v1';
@@ -11,7 +12,7 @@ const landmarks=[['taipei101','台北 101 · Taipei'],['eiffel','艾菲爾鐵塔
 const options=a=>a.map(([id,label])=>({id,label}));
 export async function initAPI(){
  try{const response=await fetch('/api/catalog');if(!response.ok)throw Error();catalog=await response.json();if(!catalog.robots)throw Error();}
- catch{local=true;const [r,e]=await Promise.all([fetch('/assets/robots/manifest.json').then(r=>r.json()),fetch('/assets/examples/catalog.json').then(r=>r.json())]);catalog={robots:r.robots,examples:e.examples,capabilities:{libraries:options(library),physics:options(physics),rewards:options(rewards),landmarks:options(landmarks),demo_duration_s:30,worker_available:false,youtube_ingest:false,upload:false}};}
+ catch{local=true;const [r,e,v]=await Promise.all([fetch('/assets/robots/manifest.json').then(r=>r.json()),fetch('/assets/examples/catalog.json').then(r=>r.json()),fetch('/assets/video-examples/catalog.json').then(r=>r.json()).catch(()=>({examples:[],sources:[]}))]);catalog={robots:r.robots,examples:e.examples,video_examples:v.examples,video_sources:v.sources,capabilities:{libraries:options(library),physics:options(physics),rewards:options(rewards),landmarks:options(landmarks),demo_duration_s:30,worker_available:false,youtube_ingest:false,upload:false}};}
  return {...catalog,browser_local:local};
 }
 export const isBrowserLocal=()=>local;
@@ -23,11 +24,14 @@ function advance(job){
  if(p>=1){const e=catalog.examples.find(e=>e.robot_type===job.robot_type);job.result={video_url:e.video_url,example_id:e.id,provenance:e.provenance,newly_trained:false,landmark_rendered:false};}
  return job;
 }
-function plan(job){return {schema:1,job_id:job.id,mode:job.mode,robot_type:job.robot_type,source:job.source,motion_id:job.motion_id,target_person:job.target_person,config:job.config,robot:catalog.robots.find(r=>r.id===job.robot_type),readiness:{q1_task_adapter_registered:false,landmark_asset_verified:false,worker_available:false},requirements:['Register a Q1 Isaac Lab 3 task adapter','Validate native joints, rewards, observation/action contracts and backend','Supply licensed USD landmark asset and evaluate checkpoint','Run actual play/render worker and preserve checkpoint/video evidence'],newly_trained:false};}
+function plan(job){const motion=job.motion_id?read().motions[job.motion_id]:null;return {schema:1,job_id:job.id,mode:job.mode,robot_type:job.robot_type,source:job.source,motion_id:job.motion_id,target_person:job.target_person,config:job.config,segment:job.segment,action_name:job.action_name,motion_extraction_ready:!!motion&&!motion.demo,motion:motion?{id:motion.id,source:motion.source,demo:motion.demo,frame_count:motion.frames.length,segment:motion.segment,mapping:motion.mapping,storage:'browser_local',requires_export:true}:null,robot:catalog.robots.find(r=>r.id===job.robot_type),readiness:{q1_task_adapter_registered:false,landmark_asset_verified:false,worker_available:false},requirements:['Register a Q1 Isaac Lab 3 task adapter','Validate native joints, rewards, observation/action contracts and backend','Supply licensed USD landmark asset and evaluate checkpoint','Run actual play/render worker and preserve checkpoint/video evidence'],newly_trained:false};}
 export async function api(path,body){
  if(!local){const result=await request(path,body);if(path.startsWith('/api/jobs')&&!path.endsWith('/plan')){result.progress=(Number(result.progress)||0)/100;result.state=({training_demo:'training',rendering_demo:'rendering',demo_complete:'complete'})[result.state]||result.state;}return result;}
  const data=read();
- if(path==='/api/jobs'&&body){const id=uid(),job={...body,id,state:body.mode==='worker'?'queued_for_worker':'ingesting',progress:0,elapsed_s:0,created_at:Date.now()/1000,result:null,browser_local:true};job.plan=plan(job);data.jobs[id]=job;save(data);return job;}
+ if(path==='/api/jobs'&&body){let source=body.source,segment=body.segment;
+ if(source.type==='video_example'){const item=catalog.video_examples?.find(v=>v.id===source.id);if(!item||item.robot_type!==body.robot_type)throw Error('影片範例與機型不符。');source={...item,type:'video_example',url:item.video_url,source_start_s:item.start_s,source_end_s:item.end_s};segment=segment||{start_s:0,end_s:item.end_s-item.start_s};}
+ if(segment){segment=validateSegment(+segment.start_s,+segment.end_s,source.type==='video_example'?source.end_s-source.start_s:undefined);segment={...segment,duration_s:segment.end_s-segment.start_s,source_start_s:(source.source_start_s||0)+segment.start_s,source_end_s:(source.source_start_s||0)+segment.end_s};}
+ const id=uid(),job={...body,source,segment,id,state:body.mode==='worker'?'queued_for_worker':'ingesting',progress:0,elapsed_s:0,created_at:Date.now()/1000,result:null,browser_local:true};job.plan=plan(job);data.jobs[id]=job;save(data);return job;}
  if(path.startsWith('/api/jobs/')){const id=path.split('/')[3],job=data.jobs[id];if(!job)throw Error('找不到工作');if(path.endsWith('/cancel'))job.state='cancelled';advance(job);save(data);return path.endsWith('/plan')?plan(job):job;}
  if(path==='/api/motions'&&body){const id=uid();data.motions[id]={id,...body};save(data);return {id};}
  if(path==='/api/listings'&&!body)return {listings:data.listings};

@@ -49,8 +49,37 @@ wheel or automatically migrates legacy action/observation contracts.
   monocular assumptions and 20 Hz native joint mapping. This is reference motion,
   not a PPO output. The original human video and MediaPipe model are not bundled.
 
-No checkpoint binaries, source caches, local logs, downloaded human video or
-upload-service response/management credentials are copied.
+## User-selected robot video excerpts
+
+The store also includes five short, silent reference excerpts from the two URLs
+selected by the user. They are source demonstrations of other robots, not Q1
+training results or evidence of Q1 hardware performance.
+
+| Target | Source and publisher | Original ranges | Bundled excerpts |
+| --- | --- | --- | --- |
+| Q1 Leg | [Unitree Introducing: H2-X Kung Fu Legend Guardian](https://youtu.be/Y3zb4o47yqA), Unitree Robotics | 33–36 s; 36–39 s; 39–41.8 s | `assets/video-examples/leg/h2x-{guard,punch,turn-kick}.{mp4,jpg,gif}` |
+| Q1 Wheel | [Meet China's AgiBot X2-N, a shape-shifting robot](https://youtu.be/TV6ctYnA9Io), China SCIO | 24–28 s; 37–40.4 s | `assets/video-examples/wheel/x2-{slope,turn}.{mp4,jpg,gif}` |
+
+The [video example catalog](../assets/video-examples/catalog.json) records source
+URLs, titles, publishers, excerpt ranges, source video hashes and excerpt MP4
+hashes. MP4/poster dimensions are 640×360; GIFs are 480×270. Original watermarks
+remain visible and the excerpts have no audio. Full originals and the full yt-dlp
+metadata stay in an ignored external cache and are not shipped in this repository.
+
+[prepare_video_examples.py](../scripts/prepare_video_examples.py) reproduces the
+five selected clips and their GIFs. It uses ffmpeg and optionally yt-dlp; the
+[video tutorial](VIDEO_TRAINING_EXAMPLES.md) gives the commands and maps local clip
+seconds to original-video time. It never trains a policy or changes URDF assets.
+
+MediaPipe's human pose model is not validated for these robot appearances. Each
+excerpt is marked `robot_video_reference`, `requires_manual_review=true`,
+`mediapipe_human_model_validated=false`, and `newly_trained=false`. Detection may
+miss the robot or follow a background person. Joint, scale, contact and motion
+references require verification; wheel velocities cannot be inferred from human
+foot trajectories. The bundled excerpt GIFs do not depict newly trained Q1 PPOs.
+
+No checkpoint binaries, complete source videos, source caches, local logs,
+downloaded human video or upload-service response/management credentials are copied.
 
 ## Third-party notices
 
@@ -58,7 +87,7 @@ The native CAD/URDF assets are user-provided. The source leg project's
 [`THIRD_PARTY.md`](https://github.com/willnien10005914/q1_leg_urdf/blob/568b33229e31cc503b6729d1185c625d35a711a4/THIRD_PARTY.md)
 states that no redistribution license is asserted for those CAD files. This
 snapshot does not assign a new license or grant additional rights to those assets
-or to the source human video.
+or to the source human or robot videos. Attribution and excerpts do not assign a new license to their source footage.
 
 The browser's vendored modules are copied unchanged from the leg project's
 `web/vendor` (itself reused from the wheel project):

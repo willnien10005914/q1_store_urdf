@@ -9,6 +9,8 @@ try{
  const context=await browser.newContext({viewport:{width:1280,height:900},acceptDownloads:true});
  const page=await context.newPage();page.on('pageerror',e=>report.pageErrors.push(e.message));
  await page.goto(base,{waitUntil:'domcontentloaded'});
+ await page.waitForFunction(()=>document.querySelector('#studio-viewer').dataset.modelReady==='true',null,{timeout:30000});
+ await page.locator('#load-example').click();
  await page.waitForFunction(()=>document.querySelector('#people button'),null,{timeout:30000});
  report.runtime=await page.locator('#runtime-badge').textContent();assert.match(report.runtime,/瀏覽器/);
  await page.locator('[data-panel="world"]').click();

@@ -13,6 +13,8 @@ try{
  page.on('pageerror',error=>report.pageErrors.push(error.message));
  page.on('requestfailed',request=>report.networkFailures.push({url:request.url(),error:request.failure()?.errorText}));
  await page.goto(base,{waitUntil:'domcontentloaded'});
+ await page.waitForFunction(()=>document.querySelector('#studio-viewer').dataset.modelReady==='true',null,{timeout:30000});
+ await page.locator('#load-example').click();
  await page.waitForFunction(()=>document.querySelector('#people button'),null,{timeout:30000});
  await page.locator('[data-source="upload"]').click();
  const upload=page.waitForResponse(response=>response.url().endsWith('/api/uploads')&&response.request().method()==='POST');
