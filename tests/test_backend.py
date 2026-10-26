@@ -1,6 +1,8 @@
 """Meaningful state, persistence, upload, and HTTP isolation checks; no GPU needed."""
 import json
 import io
+import shutil
+import stat
 import zipfile
 import copy
 import hashlib
@@ -192,6 +194,61 @@ class StoreTests(unittest.TestCase):
         raw_motion["frames"][1]["source_time"] = "2.1"
         with self.assertRaises(APIError):
             self.store.create_motion(raw_motion)
+
+    def test_youtube_ingest_saves_named_seconds_without_streaming_the_remote_cut(self):
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            self.skipTest("ffmpeg is required to build the local clip")
+        script = self.root / "ytdlp"
+        script.write_text("""#!/bin/sh
+set -eu
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output" ]; then out="$arg"; fi
+  prev="$arg"
+done
+printf '%s\\n' "$@" >> "$(dirname "$0")/args"
+printf 'x\\n' >> "$(dirname "$0")/calls"
+file=$(printf '%s' "$out" | sed 's/%(ext)s/mp4/')
+mkdir -p "$(dirname "$file")"
+ffmpeg -y -f lavfi -i testsrc=size=64x64:rate=10:duration=6 -c:v libx264 -pix_fmt yuv420p -t 6 "$file" -loglevel error
+""")
+        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        self.store.downloader = str(script)
+        self.store.ffmpeg = ffmpeg
+        with self.assertRaises(APIError):
+            self.store.ingest({"youtube_url": "https://youtu.be/abcdefghijk"})
+        saved = self.store.ingest({"youtube_url": "https://youtu.be/abcdefghijk?t=4", "action_name": "護架跨步",
+                                   "start_s": 1, "end_s": 3})
+        self.assertEqual(saved["type"], "youtube")
+        self.assertEqual(saved["action_name"], "護架跨步")
+        self.assertEqual(saved["youtube_url"], "https://www.youtube.com/watch?v=abcdefghijk")
+        self.assertAlmostEqual(saved["source_start_s"], 1, delta=.15)
+        self.assertAlmostEqual(saved["duration_s"], 2, delta=.15)
+        self.assertTrue((self.store.upload_dir / (saved["id"] + ".mp4")).is_file())
+        self.assertEqual((self.root / "calls").read_text().count("x"), 1)
+        args = (self.root / "args").read_text()
+        self.assertIn("--force-ipv4", args)
+        self.assertNotIn("--download-sections", args)
+        with self.assertRaises(APIError):
+            self.store.ingest({"youtube_url": "https://www.youtube.com/watch?v=abcdefghijk", "action_name": "太長",
+                               "start_s": 1, "end_s": 10})
+        self.assertEqual((self.root / "calls").read_text().count("x"), 1)
+        again = self.store.ingest({"youtube_url": "https://www.youtube.com/watch?v=abcdefghijk", "action_name": "第二段",
+                                   "start_s": 2, "end_s": 4})
+        self.assertEqual((self.root / "calls").read_text().count("x"), 1)
+        self.assertNotEqual(again["id"], saved["id"])
+        job = self.store.create_job(self.payload(source={"type": "youtube", "id": saved["id"]},
+            segment={"start_s": 0, "end_s": saved["duration_s"]}, action_name="護架跨步", mode="worker"))
+        self.assertEqual(job["state"], "queued_for_worker")
+        self.assertEqual(job["source"]["url"], saved["url"])
+        self.assertAlmostEqual(job["segment"]["source_start_s"], saved["source_start_s"], delta=.05)
+        self.assertFalse(job["newly_trained"])
+        renamed = self.store.save_clip({"upload_id": saved["id"], "action_name": "護架跨步·改名",
+                                        "start_s": 0, "end_s": saved["duration_s"]})
+        self.assertEqual(renamed["id"], saved["id"])
+        self.assertEqual(renamed["action_name"], "護架跨步·改名")
 
     def test_youtube_url_is_canonical_and_rejects_arbitrary_network_targets(self):
         self.assertEqual(youtube_url("https://youtu.be/abcdefghijk?t=4"), "https://www.youtube.com/watch?v=abcdefghijk")

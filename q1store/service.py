@@ -100,6 +100,49 @@ def youtube_url(value):
     return "https://www.youtube.com/watch?v=" + identifier
 
 
+def resolve_executable(*values):
+    for value in values:
+        if not value:
+            continue
+        path = Path(value)
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+        found = shutil.which(str(value))
+        if found:
+            return found
+    return None
+
+
+def media_duration(ffmpeg, path):
+    result = subprocess.run([ffmpeg, "-hide_banner", "-i", str(path)], capture_output=True, text=True, timeout=30)
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+    if not match:
+        raise APIError("無法讀取影片長度。", 502)
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def clip_bounds(payload, duration=None):
+    if not isinstance(payload, dict) or "start_s" not in payload or "end_s" not in payload:
+        raise APIError("請設定片段起點與終點（秒）。")
+    start, end = payload.get("start_s"), payload.get("end_s")
+    if (isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, (int, float))
+            or not isinstance(end, (int, float)) or not math.isfinite(start) or not math.isfinite(end)):
+        raise APIError("片段起訖時間必須是有限秒數。")
+    if start < 0 or end > 86400 or not .5 <= end - start <= 60:
+        raise APIError("片段長度必須介於 0.5 至 60 秒。")
+    if duration is not None and end > duration + .05:
+        raise APIError(f"這支影片約 {duration:.2f} 秒，請把片段放在影片長度內。")
+    return round(float(start), 3), round(float(end), 3)
+
+
+def action_label(payload, default="YouTube 動作"):
+    name = payload.get("action_name", default) if isinstance(payload, dict) else default
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80 or any(ord(char) < 32 for char in name):
+        raise APIError("動作名稱必須為 1 至 80 字。")
+    return name.strip()
+
+
 class Store:
     def __init__(self, root, data_dir=None, clock=time.time):
         self.root = Path(root).resolve()
@@ -112,7 +155,9 @@ class Store:
         self.db_path = self.data_dir / "store.sqlite3"
         self.clock = clock
         self.lock = threading.RLock()
-        self.downloader = os.environ.get("Q1_YTDLP") or shutil.which("yt-dlp")
+        self.youtube_lock = threading.Lock()
+        self.downloader = resolve_executable(os.environ.get("Q1_YTDLP"), self.root / ".venv/bin/yt-dlp", "yt-dlp")
+        self.ffmpeg = resolve_executable(os.environ.get("Q1_FFMPEG"), "ffmpeg")
         with self.connection() as db:
             for table in ("jobs", "uploads", "motions", "listings", "purchases", "registered_robots", "deployments"):
                 db.execute(f"CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
@@ -154,7 +199,7 @@ class Store:
             "capabilities": {
                 "libraries": LIBRARIES, "physics": PHYSICS, "rewards": REWARDS, "landmarks": LANDMARKS,
                 "demo_duration_s": DEMO_DURATION, "worker_available": False,
-                "youtube_ingest": bool(self.downloader), "upload": True, "motion_storage": True,
+                "youtube_ingest": bool(self.downloader and self.ffmpeg), "upload": True, "motion_storage": True,
                 "video_segments": True, "segment_min_s": .5, "segment_max_s": 60,
                 "payments": "demo_only", "training": "demo_or_external_worker_manifest",
                 "robot_registry": True, "deployment_download": True, "hardware_delivery": False,
@@ -182,34 +227,154 @@ class Store:
         self.put("uploads", value)
         return {k: v for k, v in value.items() if k != "path"}
 
-    def ingest(self, payload):
-        url = youtube_url(payload.get("youtube_url", payload.get("url", "")))
-        if not self.downloader:
-            raise APIError("尚未安裝 yt-dlp。請先上傳影片，或安裝 requirements-motion.txt 後重啟。", 503)
-        identifier = uuid.uuid4().hex
-        template = str(self.upload_dir / (identifier + ".%(ext)s"))
-        command = [self.downloader, "--ignore-config", "--no-exec", "--no-playlist", "--no-cache-dir", "--no-warnings", "--quiet",
-                   "--socket-timeout", "15", "--retries", "1", "--max-filesize", str(MAX_UPLOAD),
-                   "--restrict-filenames", "--format", "best[ext=mp4][height<=480]/best[ext=webm][height<=480]",
-                   "--output", template, "--", url]
+    def child_env(self):
+        env = os.environ.copy()
+        prefixes = []
+        for directory in (Path.home() / ".local/node/bin", Path.home() / ".local/bin"):
+            if directory.is_dir():
+                prefixes.append(str(directory))
+        for executable in (self.downloader, self.ffmpeg):
+            if executable:
+                prefixes.append(str(Path(executable).resolve().parent))
+        if prefixes:
+            env["PATH"] = os.pathsep.join(dict.fromkeys(prefixes)) + os.pathsep + env.get("PATH", "")
+        return env
+
+    def run_checked(self, command, timeout, label):
         try:
-            process = subprocess.run(command, capture_output=True, timeout=90, text=True)
+            process = subprocess.run(command, capture_output=True, timeout=timeout, text=True, env=self.child_env())
         except (OSError, subprocess.TimeoutExpired):
-            raise APIError("YouTube 下載逾時或服務無法執行；請上傳有權使用的本機影片。", 502)
-        paths = [p for p in self.upload_dir.glob(identifier + ".*") if p.suffix.lower() in VIDEO_EXTENSIONS]
-        if process.returncode or not paths:
-            for path in self.upload_dir.glob(identifier + ".*"):
-                path.unlink(missing_ok=True)
-            raise APIError("YouTube 目前無法下載此影片（可能受登入、地區或網站限制）。請上傳本機影片。", 502)
-        path = paths[0]
-        if path.stat().st_size > MAX_UPLOAD:
-            path.unlink()
-            raise APIError("影片超過 150 MB。", 413)
-        value = {"id": identifier, "url": "/media/uploads/" + path.name, "filename": path.name,
-                 "path": path.name, "size": path.stat().st_size, "type": "youtube", "youtube_url": url,
-                 "created_at": self.clock()}
+            raise APIError(label + "逾時或無法執行。", 502)
+        if process.returncode:
+            detail = (process.stderr or process.stdout or "").strip().splitlines()
+            hint = re.sub(r"https?://\S+", "", detail[-1] if detail else "")
+            hint = hint.strip()[:180]
+            raise APIError(label + "失敗。" + ((" " + hint) if hint else ""), 502)
+        return process
+
+    def ensure_youtube(self, url):
+        if not self.downloader or not self.ffmpeg:
+            raise APIError("尚未安裝 yt-dlp 與 ffmpeg。請安裝 requirements-motion.txt 後重啟服務。", 503)
+        video_id = url.rsplit("v=", 1)[-1]
+        folder = self.data_dir / "youtube"
+        folder.mkdir(exist_ok=True)
+        target = folder / (video_id + ".mp4")
+        with self.youtube_lock:
+            if target.is_file() and 0 < target.stat().st_size <= MAX_UPLOAD:
+                try:
+                    return target, media_duration(self.ffmpeg, target)
+                except APIError:
+                    target.unlink(missing_ok=True)
+            template = str(folder / (video_id + ".%(ext)s"))
+            command = [self.downloader, "--ignore-config", "--no-exec", "--no-playlist", "--no-cache-dir",
+                       "--no-warnings", "--force-ipv4", "--socket-timeout", "20", "--retries", "2",
+                       "--js-runtimes", "node", "--max-filesize", str(MAX_UPLOAD),
+                       "--format", "b[height<=480][ext=mp4]/b[height<=720][ext=mp4]/b[ext=mp4]/18",
+                       "--output", template, "--", url]
+            try:
+                self.run_checked(command, 180, "YouTube 下載")
+            except APIError:
+                for path in folder.glob(video_id + ".*"):
+                    path.unlink(missing_ok=True)
+                raise
+            downloaded = [path for path in folder.glob(video_id + ".*") if path.suffix.lower() in VIDEO_EXTENSIONS]
+            if not downloaded:
+                raise APIError("YouTube 沒有留下可播放的影片檔。", 502)
+            source = downloaded[0]
+            if source.stat().st_size > MAX_UPLOAD:
+                for path in downloaded:
+                    path.unlink(missing_ok=True)
+                raise APIError("影片超過 150 MB。請改選較短的影片，或上傳已裁好的片段。", 413)
+            if source.suffix.lower() != ".mp4":
+                converted = target.with_suffix(".transcode.mp4")
+                self.run_checked([self.ffmpeg, "-y", "-i", str(source), "-an", "-c:v", "libx264", "-preset", "veryfast",
+                                  "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(converted)],
+                                 180, "影片轉檔")
+                source.unlink(missing_ok=True)
+                source = converted
+            if source != target:
+                source.replace(target)
+            for path in folder.glob(video_id + ".*"):
+                if path != target:
+                    path.unlink(missing_ok=True)
+            return target, media_duration(self.ffmpeg, target)
+
+    def write_clip(self, source, start, end, destination):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self.run_checked([self.ffmpeg, "-y", "-i", str(source), "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
+                          "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                          "-movflags", "+faststart", str(destination)], 120, "片段裁切")
+        if not destination.is_file() or destination.stat().st_size <= 0:
+            destination.unlink(missing_ok=True)
+            raise APIError("裁切後沒有產生影片。", 502)
+        return media_duration(self.ffmpeg, destination)
+
+    def present_media(self, value):
+        shown = {key: value[key] for key in (
+            "id", "url", "filename", "size", "sha256", "created_at", "type", "youtube_url", "action_name",
+            "duration_s", "source_start_s", "source_end_s", "source_duration_s") if key in value}
+        if value.get("action_name"):
+            shown["title"] = value["action_name"]
+            shown["filename"] = value["action_name"]
+        if "source_start_s" in value and "source_end_s" in value:
+            shown["start_s"] = value["source_start_s"]
+            shown["end_s"] = value["source_end_s"]
+        if value.get("youtube_url"):
+            shown["source_url"] = value["youtube_url"]
+        return shown
+
+    def store_clip(self, source, start, end, *, media_type, name, youtube_url=None, source_offset=0, source_duration=None, parent_id=None):
+        identifier = uuid.uuid4().hex
+        destination = self.upload_dir / (identifier + ".mp4")
+        duration = self.write_clip(source, start, end, destination)
+        data = destination.read_bytes()
+        value = {"id": identifier, "url": "/media/uploads/" + destination.name, "filename": destination.name,
+                 "path": destination.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                 "created_at": self.clock(), "type": media_type, "action_name": name,
+                 "duration_s": round(duration, 3), "source_start_s": round(source_offset + start, 3),
+                 "source_end_s": round(source_offset + start + duration, 3)}
+        if youtube_url:
+            value["youtube_url"] = youtube_url
+        if source_duration is not None:
+            value["source_duration_s"] = round(float(source_duration), 3)
+        if parent_id:
+            value["parent_id"] = parent_id
         self.put("uploads", value)
-        return {k: v for k, v in value.items() if k != "path"}
+        return self.present_media(value)
+
+    def ingest(self, payload):
+        if not isinstance(payload, dict):
+            raise APIError("請提供 YouTube 網址與片段秒數。")
+        url = youtube_url(payload.get("youtube_url", payload.get("url", "")))
+        name = action_label(payload)
+        start, end = clip_bounds(payload)
+        original, full_duration = self.ensure_youtube(url)
+        if end > full_duration + .05:
+            raise APIError(f"這支影片約 {full_duration:.2f} 秒，請把片段放在影片長度內。")
+        return self.store_clip(original, start, end, media_type="youtube", name=name, youtube_url=url,
+                               source_duration=full_duration)
+
+    def save_clip(self, payload):
+        if not isinstance(payload, dict):
+            raise APIError("請提供要保存的影片片段。")
+        if not self.ffmpeg:
+            raise APIError("尚未安裝 ffmpeg，無法裁切片段。", 503)
+        upload = self.get("uploads", payload.get("upload_id", ""))
+        name = action_label(payload, upload.get("action_name") or "動作片段")
+        source = self.upload_dir / upload.get("path", "")
+        if not source.is_file():
+            raise APIError("找不到已下載的影片。", 404)
+        duration = upload.get("duration_s")
+        if not isinstance(duration, (int, float)):
+            duration = media_duration(self.ffmpeg, source)
+        start, end = clip_bounds(payload, duration)
+        if abs(start) < 1e-3 and abs(end - duration) < .08:
+            upload["action_name"] = name
+            self.put("uploads", upload)
+            return self.present_media(upload)
+        return self.store_clip(source, start, end, media_type=upload.get("type") or "upload", name=name,
+                               youtube_url=upload.get("youtube_url"), source_offset=float(upload.get("source_start_s") or 0),
+                               source_duration=upload.get("source_duration_s"), parent_id=upload["id"])
 
     def create_motion(self, payload):
         """Validate a browser geometric reference against the bundled URDF contract."""
@@ -335,7 +500,9 @@ class Store:
             return {"type": "example", "id": example["id"], "url": example.get("source_video_url", example.get("video_url", example.get("video")))}
         if source.get("type") in {"upload", "youtube"} and source.get("id"):
             upload = self.get("uploads", source["id"])
-            return {k: upload[k] for k in ("type", "id", "url", "filename")}
+            kept = ("type", "id", "url", "filename", "youtube_url", "action_name", "duration_s",
+                    "source_start_s", "source_end_s", "source_duration_s", "sha256")
+            return {key: upload[key] for key in kept if key in upload}
         # YouTube can remain a planning source without pretending a blocked download succeeded.
         if source.get("type") == "youtube":
             return {"type": "youtube", "url": youtube_url(source.get("url", "")), "downloaded": False}

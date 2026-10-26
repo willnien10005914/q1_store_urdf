@@ -187,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise APIError("請求內容必須是 JSON object。")
             if path == "/api/ingest":
                 result = self.store.ingest(payload)
+            elif path == "/api/clips":
+                result = self.store.save_clip(payload)
             elif path == "/api/jobs":
                 result = self.store.create_job(payload)
             elif path == "/api/motions":
