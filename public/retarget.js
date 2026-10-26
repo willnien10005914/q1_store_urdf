@@ -1,3 +1,4 @@
+import {tr,L} from './i18n.js';
 const COLORS=['#00a77a','#7661e8','#f29832','#e3517c'];
 const CONNECTIONS=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32]];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -70,11 +71,11 @@ function demoLandmarks(t,offset=0){
 
 /** Validate local playable-video bounds; original YouTube offsets belong to source metadata. */
 export function normalizeVideoSegment(segment,duration){
-  if(!segment||typeof segment!=='object'||Array.isArray(segment))throw new Error('請選擇影片片段的起訖時間。');
+  if(!segment||typeof segment!=='object'||Array.isArray(segment))throw new Error(tr('請選擇影片片段的起訖時間。','Choose the start and end time of the video segment.'));
   const {start_s,end_s}=segment;
-  if(typeof start_s!=='number'||typeof end_s!=='number'||!Number.isFinite(start_s)||!Number.isFinite(end_s))throw new Error('片段時間必須是有限秒數。');
-  if(!Number.isFinite(duration)||duration<=0)throw new Error('請先載入可播放的影片與長度。');
-  if(start_s<0||end_s-start_s<.5-1e-8||end_s-start_s>60+1e-8||end_s>duration+1e-6)throw new Error('請選擇影片內0.5至60秒的有效片段。');
+  if(typeof start_s!=='number'||typeof end_s!=='number'||!Number.isFinite(start_s)||!Number.isFinite(end_s))throw new Error(tr('片段時間必須是有限秒數。','Segment times must be finite seconds.'));
+  if(!Number.isFinite(duration)||duration<=0)throw new Error(tr('請先載入可播放的影片與長度。','Load a playable video with a known duration first.'));
+  if(start_s<0||end_s-start_s<.5-1e-8||end_s-start_s>60+1e-8||end_s>duration+1e-6)throw new Error(tr('請選擇影片內0.5至60秒的有效片段。','Choose a valid 0.5–60 s segment within the video.'));
   return {start_s,end_s:Math.min(end_s,duration)};
 }
 
@@ -104,7 +105,7 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
       const p=landmarks[index],hip={x:(p[23].x+p[24].x)/2,y:(p[23].y+p[24].y)/2};
       let best=null,distance=.21;
       for(const track of remaining){if(used.has(track.id))continue;const d=Math.hypot(hip.x-track.hip.x,hip.y-track.hip.y);if(d<distance){distance=d;best=track;}}
-      if(!best){const n=nextTrack++;best={id:'person-'+n,color:COLORS[n%COLORS.length],label:(requireTargetSelection?'候選 ':'人物 ')+(n+1)};}
+      if(!best){const n=nextTrack++;best={id:'person-'+n,color:COLORS[n%COLORS.length],label:(requireTargetSelection?tr('候選 ','Candidate '):tr('人物 ','Person '))+(n+1)};}
       used.add(best.id);people.push({...best,index,hip,seen:now,landmarks:p,world:worlds[index],confidence:p.reduce((s,v)=>s+(v.visibility??1),0)/p.length});
     }
     tracks=people.concat(remaining.filter(t=>!used.has(t.id)));
@@ -116,7 +117,7 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
     draw(people);const target=people.find(p=>p.id===selected);
     if(!target){
       if(requireTargetSelection&&selected===null&&people.length)video.pause();
-      onStatus(requireTargetSelection&&selected===null?(people.length?'影片已暫停 · 請確認來源機器人並點選候選目標繼續；若只有背景人物，可保留為參考工作。':'等待來源機器人的候選姿態；尚未選取目標，不輸出關節。'):'選取的目標暫時離開畫面；暫停輸出關節。');return;
+      onStatus(requireTargetSelection&&selected===null?(people.length?tr('影片已暫停 · 請確認來源機器人並點選候選目標繼續；若只有背景人物，可保留為參考工作。','Video paused · confirm the source robot and click a candidate to continue; if only background people are present, keep it as a reference job.'):tr('等待來源機器人的候選姿態；尚未選取目標，不輸出關節。','Waiting for a candidate pose of the source robot; no target selected, no joints output.')):tr('選取的目標暫時離開畫面；暫停輸出關節。','The selected target left the frame; joint output paused.'));return;
     }
     const raw=mapLandmarks(target.landmarks,robot),joints={};
     for(const [k,v]of Object.entries(raw)){smoothed[k]=(smoothed[k]??v)*.55+v*.45;joints[k]=smoothed[k];}
@@ -126,7 +127,7 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
   }
   function finishSegment(){
     running=false;cancelAnimationFrame(raf);video.pause();if(originalLoop!==null){video.loop=originalLoop;originalLoop=null;}
-    onStatus(requireTargetSelection&&selected===null?'片段檢視完成 · 沒有已確認的來源機器人；可保留片段交由專用追蹤 adapter 核對。':frames.length>=2?'片段辨識完成 · '+frames.length+'個影格；請檢查追蹤目標與關節映射。':'片段辨識完成 · 有效影格不足2個；請重選目標，或以人工標記／機器人追蹤 adapter 建立參考。');
+    onStatus(requireTargetSelection&&selected===null?tr('片段檢視完成 · 沒有已確認的來源機器人；可保留片段交由專用追蹤 adapter 核對。','Segment review complete · no confirmed source robot; keep the segment for a dedicated tracking adapter.'):frames.length>=2?tr('片段辨識完成 · ','Segment recognition complete · ')+frames.length+tr('個影格；請檢查追蹤目標與關節映射。',' frames; check the tracking target and joint mapping.'):tr('片段辨識完成 · 有效影格不足2個；請重選目標，或以人工標記／機器人追蹤 adapter 建立參考。','Segment recognition complete · fewer than 2 valid frames; reselect the target or build a reference with manual labels / a robot tracking adapter.'));
   }
   function tick(now){
     if(!running)return;
@@ -141,10 +142,10 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
         const t=(now-startAt)/1000;
         if(selected===null)selectTarget('person-0');
         // Demo identities are authored roles, independent of real detector timeouts.
-        deliver([0,1].map(index=>({id:'person-'+index,index,color:COLORS[index],label:'人物 '+(index+1),landmarks:demoLandmarks(t,index*.34),confidence:.98})),t);
+        deliver([0,1].map(index=>({id:'person-'+index,index,color:COLORS[index],label:tr('人物 ','Person ')+(index+1),landmarks:demoLandmarks(t,index*.34),confidence:.98})),t);
       }
       else{const result=detector.detectForVideo(video,now);deliver(identify(result.landmarks,result.worldLandmarks),video.currentTime);}
-    }catch(error){stop();onStatus('MediaPipe 偵測停止：'+error.message);}
+    }catch(error){stop();onStatus(tr('MediaPipe 偵測停止：','MediaPipe detection stopped: ')+error.message);}
   }
   function stop(){running=false;session++;cancelAnimationFrame(raf);if(originalLoop!==null){video.loop=originalLoop;originalLoop=null;}ctx.clearRect(0,0,overlay.width,overlay.height);return api;}
   function resetCapture(){
@@ -155,34 +156,34 @@ export function createRetargetController({video,overlay,onPeople=()=>{},onFrame=
     if(!segment||Math.abs(video.currentTime-segment.start_s)<.001)return;
     if(typeof video.addEventListener!=='function'){video.currentTime=segment.start_s;return;}
     await new Promise((resolve,reject)=>{
-      const timeout=setTimeout(()=>finish(new Error('影片定位逾時，請重新載入影片。')),8000);
+      const timeout=setTimeout(()=>finish(new Error(tr('影片定位逾時，請重新載入影片。','Video seek timed out; reload the video.'))),8000);
       function finish(error){clearTimeout(timeout);video.removeEventListener('seeked',done);video.removeEventListener('error',failed);error?reject(error):resolve();}
-      const done=()=>finish(),failed=()=>finish(new Error('無法定位影片片段。'));
+      const done=()=>finish(),failed=()=>finish(new Error(tr('無法定位影片片段。','Cannot seek to the video segment.')));
       video.addEventListener('seeked',done,{once:true});video.addEventListener('error',failed,{once:true});video.currentTime=segment.start_s;
     });
   }
   async function start(options={}){
     stop();const token=++session;demo=options.demo===true;requireTargetSelection=!demo&&options.requireTargetSelection===true;robot=options.robot||robot;tracks=[];selected=null;frames=[];nextTrack=0;smoothed={};lastVideo=-1;lastInference=-Infinity;
     segment=!demo&&options.segment?normalizeVideoSegment(options.segment,video.duration):null;
-    if(!demo){if(video.readyState<2)throw new Error('請先載入可播放的影片。');video.pause();if(segment){originalLoop=video.loop;video.loop=false;}}
+    if(!demo){if(video.readyState<2)throw new Error(tr('請先載入可播放的影片。','Load a playable video first.'));video.pause();if(segment){originalLoop=video.loop;video.loop=false;}}
     if(!demo&&!detector){
-      onStatus('正在載入 MediaPipe Pose Landmarker（首次需要網路）…');
+      onStatus(tr('正在載入 MediaPipe Pose Landmarker（首次需要網路）…','Loading MediaPipe Pose Landmarker (network needed the first time)…'));
       try{
         const {FilesetResolver,PoseLandmarker}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/vision_bundle.mjs');
         const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm');
         detector=await PoseLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',delegate:'CPU'},runningMode:'VIDEO',numPoses:4,minPoseDetectionConfidence:.45,minPosePresenceConfidence:.45,minTrackingConfidence:.45,outputSegmentationMasks:false});
-      }catch(error){onStatus('MediaPipe 載入失敗，請檢查網路後重試。'+error.message);throw error;}
+      }catch(error){onStatus(tr('MediaPipe 載入失敗，請檢查網路後重試。','MediaPipe failed to load; check the network and retry.')+error.message);throw error;}
     }
     if(token!==session)return api;
     if(!demo){await seekToStart();if(token!==session)return api;await video.play();}
-    running=true;startAt=captureStartAt=performance.now();onStatus(demo?'功夫動作示意 · 程序化骨架，非影片辨識結果':'MediaPipe 即時辨識 · 點選顏色追蹤目標');raf=requestAnimationFrame(tick);return api;
+    running=true;startAt=captureStartAt=performance.now();onStatus(demo?tr('功夫動作示意 · 程序化骨架，非影片辨識結果','Kung fu motion sketch · procedural skeleton, not video recognition'):tr('MediaPipe 即時辨識 · 點選顏色追蹤目標','MediaPipe live recognition · click a color to track'));raf=requestAnimationFrame(tick);return api;
   }
   const api={start,stop,resetCapture,selectPerson(id){
     selectTarget(id);
     if(running&&requireTargetSelection&&video.paused){
       // Pausing for human review must not expire the candidate's tracking identity.
       const now=performance.now(),token=session,targetId=selected;tracks=tracks.map(track=>({...track,seen:now}));
-      Promise.resolve(video.play()).then(()=>{if(running&&session===token&&selected===targetId)onStatus('已選取候選目標 · 繼續片段辨識，請核對來源機器人與關節映射。');}).catch(error=>{if(running&&session===token)onStatus('目標已選取，請按播放繼續辨識：'+error.message);});
+      Promise.resolve(video.play()).then(()=>{if(running&&session===token&&selected===targetId)onStatus(tr('已選取候選目標 · 繼續片段辨識，請核對來源機器人與關節映射。','Candidate selected · continuing segment recognition; verify the source robot and joint mapping.'));}).catch(error=>{if(running&&session===token)onStatus(tr('目標已選取，請按播放繼續辨識：','Target selected; press play to continue recognition: ')+error.message);});
     }
     return api;
   },setRobot(value){robot=value;smoothed={};return api;},getFrames(){return frames.slice();},

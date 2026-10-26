@@ -2,6 +2,7 @@ import * as THREE from './vendor/three/three.module.js';
 import {OrbitControls} from './vendor/three/examples/jsm/controls/OrbitControls.js';
 import {STLLoader} from './vendor/three/examples/jsm/loaders/STLLoader.js';
 import URDFLoader from './vendor/urdf-loader/URDFLoader.js';
+import {tr,L} from './i18n.js';
 
 /** Native URDF geometry preview. This module never executes physics or a policy. */
 export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=>{}}={}) {
@@ -14,7 +15,7 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
   renderer.outputColorSpace=THREE.SRGBColorSpace;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure=1;
-  renderer.domElement.setAttribute('aria-label','原生 URDF 關節幾何預覽，可拖曳旋轉');
+  renderer.domElement.setAttribute('aria-label',tr('原生 URDF 關節幾何預覽，可拖曳旋轉','Native URDF joint preview; drag to orbit'));
   renderer.domElement.style.cssText='width:100%;height:100%;display:block;touch-action:none';
   container.append(renderer.domElement);
   const controls=new OrbitControls(camera,renderer.domElement);
@@ -100,19 +101,19 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
     return q;
   }
   async function loadRobot(entry){
-    const token=++loadToken;manifest=entry;container.dataset.modelReady='false';onStatus('正在載入原生 URDF 與 meshes…');
+    const token=++loadToken;manifest=entry;container.dataset.modelReady='false';onStatus(tr('正在載入原生 URDF 與 meshes…','Loading native URDF and meshes…'));
     let loaded;
     const manager=new THREE.LoadingManager();
     const loader=new URDFLoader(manager);loader.parseCollision=false;
     const meshLoads=[];
     let started=0,finished=0;
-    const showProgress=()=>{const text=`正在載入 Q1 模型 ${finished}/${Math.max(started,1)}`;document.querySelectorAll('.loading-model').forEach(label=>{label.textContent=text;});onStatus(text);};
+    const showProgress=()=>{const text=`${tr('正在載入 Q1 模型','Loading Q1 model')} ${finished}/${Math.max(started,1)}`;document.querySelectorAll('.loading-model').forEach(label=>{label.textContent=text;});onStatus(text);};
     // FileLoader shares pending URLs across viewers without accounting for the
     // second LoadingManager. Wait for each actual mesh attachment instead.
     loader.loadMeshCb=(path,loadingManager,done)=>{
       started++;showProgress();
       meshLoads.push(new Promise((resolve,reject)=>{
-        if(!/\.stl$/i.test(path)){const error=new Error('不支援的原生 mesh：'+path);done(null,error);reject(error);return;}
+        if(!/\.stl$/i.test(path)){const error=new Error(tr('不支援的原生 mesh：','Unsupported native mesh: ')+path);done(null,error);reject(error);return;}
         new STLLoader(loadingManager).load(path,geometry=>{done(new THREE.Mesh(geometry));finished++;showProgress();resolve();},undefined,error=>{done(null,error);reject(error);});
       }));
     };
@@ -126,10 +127,10 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       robot.traverse(o=>{if(o.isMesh){for(const m of(Array.isArray(o.material)?o.material:[o.material]))if(m)oldMaterials.add(m);o.material=modelMaterial;o.castShadow=false;o.receiveShadow=false;}});
       oldMaterials.forEach(m=>m.dispose());
       setJoints(demoPose(0));robot.updateMatrixWorld(true);bounds.setFromObject(robot);
-      if(bounds.isEmpty()||!Number.isFinite(bounds.min.z)||!Number.isFinite(bounds.max.z))throw new Error('原生模型的 mesh 或姿態範圍無效。');
+      if(bounds.isEmpty()||!Number.isFinite(bounds.min.z)||!Number.isFinite(bounds.max.z))throw new Error(tr('原生模型的 mesh 或姿態範圍無效。','Native model mesh or pose bounds are invalid.'));
       robot.position.z-=bounds.min.z;
-      fit();container.querySelectorAll('.loading-model').forEach(element=>element.remove());renderer.render(scene,camera);container.dataset.modelReady='true';container.dataset.robotType=entry.id;container.dataset.meshCount=String(meshLoads.length);onStatus(`${entry.name||entry.label||entry.id} · 原生 URDF 幾何預覽`);return api;
-    }catch(error){if(loaded){scene.remove(loaded);disposeModel(loaded);if(loaded===robot)robot=null;}onStatus('模型載入失敗：'+error.message);throw error;}
+      fit();container.querySelectorAll('.loading-model').forEach(element=>element.remove());renderer.render(scene,camera);container.dataset.modelReady='true';container.dataset.robotType=entry.id;container.dataset.meshCount=String(meshLoads.length);onStatus(`${entry.name||entry.label||entry.id} · ${tr('原生 URDF 幾何預覽','native URDF geometry preview')}`);return api;
+    }catch(error){if(loaded){scene.remove(loaded);disposeModel(loaded);if(loaded===robot)robot=null;}onStatus(tr('模型載入失敗：','Model load failed: ')+error.message);throw error;}
   }
   function animate(now){
     if(disposed)return;frame=requestAnimationFrame(animate);
@@ -139,7 +140,17 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
     if(playing&&robot){time+=delta;setJoints(demoPose(time));}
     controls.update();renderer.render(scene,camera);
   }
-  const api={loadRobot,setJoints,setRenderingPaused(value){renderingPaused=!!value;last=0;return api;},setMotion(name,t){motion=name;if(Number.isFinite(t))time=t;if(robot)setJoints(demoPose(time));return api;},setPlaying(value){playing=!!value;return api;},setLandmark,
+  /** Movable, non-mimic joints with their URDF limits and current angle, in URDF order. */
+  function getJointStates(){
+    if(!robot)return [];
+    return Object.values(robot.joints).filter(j=>j.jointType!=='fixed'&&!j.mimicJoint).map(j=>{
+      const continuous=j.jointType==='continuous';
+      const lower=continuous?-Math.PI:Number.isFinite(j.limit?.lower)?j.limit.lower:-Math.PI,upper=continuous?Math.PI:Number.isFinite(j.limit?.upper)?j.limit.upper:Math.PI;
+      const value=Array.isArray(j.jointValue)?j.jointValue[0]:Number(j.angle)||0;
+      return {name:j.name,type:j.jointType,lower,upper,value:Number.isFinite(value)?value:0};
+    });
+  }
+  const api={loadRobot,setJoints,getJointStates,setRenderingPaused(value){renderingPaused=!!value;last=0;return api;},setMotion(name,t){motion=name;if(Number.isFinite(t))time=t;if(robot)setJoints(demoPose(time));return api;},setPlaying(value){playing=!!value;return api;},setLandmark,
     getRobot(){return robot;},capture(){renderer.render(scene,camera);return renderer.domElement.toDataURL('image/png');},
     dispose(){if(disposed)return;disposed=true;loadToken++;cancelAnimationFrame(frame);observer.disconnect();visibilityObserver.disconnect();controls.dispose();disposeModel(robot);scene.traverse(o=>{o.geometry?.dispose();if(o.material&&!Array.isArray(o.material))o.material.dispose();});renderer.dispose();renderer.domElement.remove();}};
   frame=requestAnimationFrame(animate);return api;

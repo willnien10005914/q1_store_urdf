@@ -20,73 +20,500 @@
       "name": "Q1 Leg",
       "form": "雙足 · BIPED",
       "summary": "髖 3 軸、膝、踝 2 軸的完整雙足下肢，加上腰 3 軸與肩肘手臂；可步行、閃身、蹲起與上肢動作。",
-      "best_for": ["跨步、閃身與重心轉移", "蹲下、起身與起跳準備", "需要腳踝姿態回饋的平衡動作"],
+      "best_for": [
+        "跨步、閃身與重心轉移",
+        "蹲下、起身與起跳準備",
+        "需要腳踝姿態回饋的平衡動作"
+      ],
       "specs": [
-        {"id": "locomotion", "label": "移動方式", "value": "雙足步行／側向閃身", "unit": "", "status": "source", "source": "quanta_robot_legged.urdf", "note": "每腿 髖 Pitch/Roll/Yaw、膝 Pitch、踝 Pitch/Roll 六軸。"},
-        {"id": "speed", "label": "速度指令", "value": 0.22, "unit": "m/s", "status": "command", "source": "q1_leg_urdf/config/v5_gaits_lift6.json", "note": "前進方向的指令設定上限；不是實測最高速度，也不是閃身平均速度。"},
-        {"id": "balance_feedback", "label": "平衡回饋", "value": "踝 pitch/roll + 角速度", "unit": "", "status": "source", "source": "leg_humanoid_lab/isaac_env.py", "note": "策略輸出外另加 ±0.15 rad 的踝關節姿態修正。"},
-        {"id": "power_bus", "label": "電源匯流排", "value": "待量測", "unit": "", "status": "unmeasured", "source": null, "note": "雙足專案目前沒有電池與馬達元件表；URDF 的 100 N·m / 10 rad/s 是模擬限制值。"},
-        {"id": "battery", "label": "電池容量 / 續航", "value": "待量測", "unit": "", "status": "unmeasured", "source": null, "note": "沒有電池容量與實機續航量測；不能由 PPO 更新數或模擬力矩換算。"},
-        {"id": "training_hw", "label": "訓練硬體", "value": "DGX Spark GB10 · Isaac Sim 5.1 / Isaac Lab · RSL-RL PPO", "unit": "", "status": "source", "source": "本站 Spark worker", "note": "本站真實訓練使用的 GPU 與軟體堆疊；時數為預算，非成功保證。"},
-        {"id": "history", "label": "歷史 PPO 成果", "value": "閃身步 6,144 envs × 8,000 updates", "unit": "", "status": "measured", "source": "/assets/examples/leg/evidence.json", "note": "歷史原生 Isaac Sim / PhysX 模擬影片；真機未驗證。"}
+        {
+          "id": "locomotion",
+          "label": "移動方式",
+          "value": "雙足步行／側向閃身",
+          "unit": "",
+          "status": "source",
+          "source": "quanta_robot_legged.urdf",
+          "note": "每腿 髖 Pitch/Roll/Yaw、膝 Pitch、踝 Pitch/Roll 六軸。",
+          "label_en": "Locomotion",
+          "note_en": "Six axes per leg: hip pitch/roll/yaw, knee pitch, ankle pitch/roll.",
+          "value_en": "Biped walking / lateral sidestep"
+        },
+        {
+          "id": "speed",
+          "label": "速度指令",
+          "value": 0.22,
+          "unit": "m/s",
+          "status": "command",
+          "source": "q1_leg_urdf/config/v5_gaits_lift6.json",
+          "note": "前進方向的指令設定上限；不是實測最高速度，也不是閃身平均速度。",
+          "label_en": "Speed command",
+          "note_en": "Forward command cap; not a measured top speed or the average sidestep speed."
+        },
+        {
+          "id": "balance_feedback",
+          "label": "平衡回饋",
+          "value": "踝 pitch/roll + 角速度",
+          "unit": "",
+          "status": "source",
+          "source": "leg_humanoid_lab/isaac_env.py",
+          "note": "策略輸出外另加 ±0.15 rad 的踝關節姿態修正。",
+          "label_en": "Balance feedback",
+          "note_en": "Adds ±0.15 rad ankle posture correction on top of the policy output.",
+          "value_en": "Ankle pitch/roll + angular velocity"
+        },
+        {
+          "id": "power_bus",
+          "label": "電源匯流排",
+          "value": "待量測",
+          "unit": "",
+          "status": "unmeasured",
+          "source": null,
+          "note": "雙足專案目前沒有電池與馬達元件表；URDF 的 100 N·m / 10 rad/s 是模擬限制值。",
+          "label_en": "Power bus",
+          "note_en": "The biped project has no battery or motor component sheet yet; the URDF 100 N·m / 10 rad/s values are simulation limits.",
+          "value_en": "Unmeasured"
+        },
+        {
+          "id": "battery",
+          "label": "電池容量 / 續航",
+          "value": "待量測",
+          "unit": "",
+          "status": "unmeasured",
+          "source": null,
+          "note": "沒有電池容量與實機續航量測；不能由 PPO 更新數或模擬力矩換算。",
+          "label_en": "Battery capacity / endurance",
+          "note_en": "No battery capacity or real endurance measurement; cannot be derived from PPO updates or simulated torque.",
+          "value_en": "Unmeasured"
+        },
+        {
+          "id": "training_hw",
+          "label": "訓練硬體",
+          "value": "DGX Spark GB10 · Isaac Sim 5.1 / Isaac Lab · RSL-RL PPO",
+          "unit": "",
+          "status": "source",
+          "source": "本站 Spark worker",
+          "note": "本站真實訓練使用的 GPU 與軟體堆疊；時數為預算，非成功保證。",
+          "label_en": "Training hardware",
+          "note_en": "GPU and software stack used for real training on this store; hours are a budget, not a guarantee."
+        },
+        {
+          "id": "history",
+          "label": "歷史 PPO 成果",
+          "value": "閃身步 6,144 envs × 8,000 updates",
+          "unit": "",
+          "status": "measured",
+          "source": "/assets/examples/leg/evidence.json",
+          "note": "歷史原生 Isaac Sim / PhysX 模擬影片；真機未驗證。",
+          "label_en": "Historical PPO result",
+          "note_en": "Historical native Isaac Sim / PhysX simulation video; not validated on hardware.",
+          "value_en": "Sidestep 6,144 envs × 8,000 updates"
+        }
+      ],
+      "form_en": "BIPED",
+      "summary_en": "Full biped lower body with 3-axis hip, knee and 2-axis ankle, plus a 3-axis waist and shoulder-elbow arms; capable of walking, sidestepping, crouching and upper-body motion.",
+      "best_for_en": [
+        "Stepping, sidestepping and weight shifts",
+        "Crouching, standing up and jump preparation",
+        "Balance motions that need ankle posture feedback"
       ]
     },
     "wheel": {
       "name": "Q1 Wheel",
       "form": "雙輪 · WHEELED",
       "summary": "髖 2 軸加膝連桿與驅動輪的輪足下肢，腰 3 軸與肩肘腕手；適合平地滑行、轉向與上肢操作。",
-      "best_for": ["平地連續滑行與轉向", "低能耗長距離移動（待量測）", "上肢揮動與抓握示意"],
+      "best_for": [
+        "平地連續滑行與轉向",
+        "低能耗長距離移動（待量測）",
+        "上肢揮動與抓握示意"
+      ],
       "specs": [
-        {"id": "locomotion", "label": "移動方式", "value": "雙輪滑行／原地轉向", "unit": "", "status": "source", "source": "quanta_robot_wheeled.urdf", "note": "每腿 髖 Pitch/Roll、膝連桿兩軸、連續旋轉驅動輪；沒有踝關節與腳掌。"},
-        {"id": "wheel_radius", "label": "驅動輪半徑", "value": 0.1, "unit": "m", "status": "source", "source": "q1_wheel_urdf/config/q1_wheel_components.yaml", "note": "元件表的 200 mm 輪徑；來自雙輪專案的硬體元件表，非本 URDF 量測。"},
-        {"id": "power_bus", "label": "電源匯流排", "value": 48, "unit": "V", "status": "source", "source": "q1_wheel_urdf/config/q1_wheel_components.yaml", "note": "元件表標示 48 V 電池匯流排（AK10-9 / AKE90），腕手用 24 V 降壓。電池容量仍待量測。"},
-        {"id": "motors", "label": "關節馬達（元件表）", "value": "髖/膝 AKE90-8 55 N·m 額定 · 腰/肩/肘/輪 AK10-9 18 N·m 額定", "unit": "", "status": "source", "source": "q1_wheel_urdf/config/q1_wheel_components.yaml", "note": "CubeMars 資料表的輸出端額定值；雙輪專案 build_urdf 的對應，不是本 URDF 的實測。"},
-        {"id": "control_rate", "label": "控制迴路", "value": "CAN 200 Hz · 策略 50 Hz", "unit": "", "status": "source", "source": "q1_wheel_urdf/config/q1_wheel_components.yaml", "note": "元件表設定值。"},
-        {"id": "battery", "label": "電池容量 / 續航", "value": "待量測", "unit": "", "status": "unmeasured", "source": null, "note": "元件表只有匯流排電壓，沒有電池容量、電流與續航量測。"},
-        {"id": "training_hw", "label": "訓練硬體", "value": "尚未接入本站 worker", "unit": "", "status": "unverified", "source": null, "note": "雙輪 Isaac Lab 任務（wheel_humanoid_lab）與本站 URDF 契約不同，需另接 task adapter。"},
-        {"id": "history", "label": "歷史 PPO 成果", "value": "滑行 3,800 updates（舊 24 軸契約）", "unit": "", "status": "measured", "source": "/assets/examples/wheel/evidence.json", "note": "歷史 RSL-RL PPO 影片；與目前 URDF 的控制契約不相容。"}
+        {
+          "id": "locomotion",
+          "label": "移動方式",
+          "value": "雙輪滑行／原地轉向",
+          "unit": "",
+          "status": "source",
+          "source": "quanta_robot_wheeled.urdf",
+          "note": "每腿 髖 Pitch/Roll、膝連桿兩軸、連續旋轉驅動輪；沒有踝關節與腳掌。",
+          "label_en": "Locomotion",
+          "note_en": "Per leg: hip pitch/roll, two knee-linkage axes, continuous drive wheel; no ankle or foot.",
+          "value_en": "Two-wheel skating / in-place turn"
+        },
+        {
+          "id": "wheel_radius",
+          "label": "驅動輪半徑",
+          "value": 0.1,
+          "unit": "m",
+          "status": "source",
+          "source": "q1_wheel_urdf/config/q1_wheel_components.yaml",
+          "note": "元件表的 200 mm 輪徑；來自雙輪專案的硬體元件表，非本 URDF 量測。",
+          "label_en": "Drive wheel radius",
+          "note_en": "200 mm wheel diameter from the component sheet of the wheeled project, not measured on this URDF."
+        },
+        {
+          "id": "power_bus",
+          "label": "電源匯流排",
+          "value": 48,
+          "unit": "V",
+          "status": "source",
+          "source": "q1_wheel_urdf/config/q1_wheel_components.yaml",
+          "note": "元件表標示 48 V 電池匯流排（AK10-9 / AKE90），腕手用 24 V 降壓。電池容量仍待量測。",
+          "label_en": "Power bus",
+          "note_en": "Component sheet lists a 48 V battery bus (AK10-9 / AKE90) with 24 V step-down for wrist and hand. Battery capacity still unmeasured."
+        },
+        {
+          "id": "motors",
+          "label": "關節馬達（元件表）",
+          "value": "髖/膝 AKE90-8 55 N·m 額定 · 腰/肩/肘/輪 AK10-9 18 N·m 額定",
+          "unit": "",
+          "status": "source",
+          "source": "q1_wheel_urdf/config/q1_wheel_components.yaml",
+          "note": "CubeMars 資料表的輸出端額定值；雙輪專案 build_urdf 的對應，不是本 URDF 的實測。",
+          "label_en": "Joint motors (component sheet)",
+          "note_en": "Output-side ratings from CubeMars datasheets as mapped by the wheeled project build_urdf; not measured on this URDF.",
+          "value_en": "Hip/knee AKE90-8 55 N·m rated · waist/shoulder/elbow/wheel AK10-9 18 N·m rated"
+        },
+        {
+          "id": "control_rate",
+          "label": "控制迴路",
+          "value": "CAN 200 Hz · 策略 50 Hz",
+          "unit": "",
+          "status": "source",
+          "source": "q1_wheel_urdf/config/q1_wheel_components.yaml",
+          "note": "元件表設定值。",
+          "label_en": "Control loop",
+          "note_en": "Component sheet setting.",
+          "value_en": "CAN 200 Hz · policy 50 Hz"
+        },
+        {
+          "id": "battery",
+          "label": "電池容量 / 續航",
+          "value": "待量測",
+          "unit": "",
+          "status": "unmeasured",
+          "source": null,
+          "note": "元件表只有匯流排電壓，沒有電池容量、電流與續航量測。",
+          "label_en": "Battery capacity / endurance",
+          "note_en": "The component sheet only has the bus voltage; no capacity, current or endurance measurement.",
+          "value_en": "Unmeasured"
+        },
+        {
+          "id": "training_hw",
+          "label": "訓練硬體",
+          "value": "尚未接入本站 worker",
+          "unit": "",
+          "status": "unverified",
+          "source": null,
+          "note": "雙輪 Isaac Lab 任務（wheel_humanoid_lab）與本站 URDF 契約不同，需另接 task adapter。",
+          "label_en": "Training hardware",
+          "note_en": "The wheeled Isaac Lab task (wheel_humanoid_lab) uses a different contract than this URDF; it needs its own task adapter.",
+          "value_en": "Not wired to this store worker yet"
+        },
+        {
+          "id": "history",
+          "label": "歷史 PPO 成果",
+          "value": "滑行 3,800 updates（舊 24 軸契約）",
+          "unit": "",
+          "status": "measured",
+          "source": "/assets/examples/wheel/evidence.json",
+          "note": "歷史 RSL-RL PPO 影片；與目前 URDF 的控制契約不相容。",
+          "label_en": "Historical PPO result",
+          "note_en": "Historical RSL-RL PPO video; not compatible with the current URDF control contract.",
+          "value_en": "Skating 3,800 updates (legacy 24-axis contract)"
+        }
+      ],
+      "form_en": "WHEELED",
+      "summary_en": "Wheel-leg lower body with a 2-axis hip, knee linkage and drive wheel, plus a 3-axis waist and shoulder-elbow-wrist-hand arms; suited to flat-ground skating, turning and upper-body manipulation.",
+      "best_for_en": [
+        "Continuous flat-ground skating and turning",
+        "Low-energy long-distance travel (unmeasured)",
+        "Arm swings and grasp sketches"
       ]
     }
   },
   "joint_groups": {
-    "waist": {"label": "腰", "pattern": "waist"},
-    "hip": {"label": "髖", "pattern": "hip"},
-    "knee": {"label": "膝", "pattern": "knee"},
-    "ankle": {"label": "踝", "pattern": "ankle"},
-    "shoulder": {"label": "肩", "pattern": "shoulder"},
-    "elbow": {"label": "肘", "pattern": "elbow"},
-    "wrist": {"label": "腕", "pattern": "wrist"},
-    "finger": {"label": "手指", "pattern": "finger"},
-    "wheel": {"label": "驅動輪", "pattern": "wheel"}
+    "waist": {
+      "label": "腰",
+      "pattern": "waist",
+      "label_en": "Waist"
+    },
+    "hip": {
+      "label": "髖",
+      "pattern": "hip",
+      "label_en": "Hip"
+    },
+    "knee": {
+      "label": "膝",
+      "pattern": "knee",
+      "label_en": "Knee"
+    },
+    "ankle": {
+      "label": "踝",
+      "pattern": "ankle",
+      "label_en": "Ankle"
+    },
+    "shoulder": {
+      "label": "肩",
+      "pattern": "shoulder",
+      "label_en": "Shoulder"
+    },
+    "elbow": {
+      "label": "肘",
+      "pattern": "elbow",
+      "label_en": "Elbow"
+    },
+    "wrist": {
+      "label": "腕",
+      "pattern": "wrist",
+      "label_en": "Wrist"
+    },
+    "finger": {
+      "label": "手指",
+      "pattern": "finger",
+      "label_en": "Fingers"
+    },
+    "wheel": {
+      "label": "驅動輪",
+      "pattern": "wheel",
+      "label_en": "Drive wheel"
+    }
   },
   "motions": [
-    {"id": "stand", "label": "站立平衡", "groups": ["waist", "hip", "knee", "ankle"], "description": "維持直立、抵抗擾動與回站。",
-     "support": {"leg": {"status": "trained_history", "note": "歷史 stand / balance PPO；本站可用 motion tracking 重新訓練。"},
-                 "wheel": {"status": "trained_history", "note": "歷史 skate/stand 策略（舊 24 軸契約）；需輪速平衡。"}},
-     "hardware": "下肢全部位置控制軸；雙輪另需驅動輪速度控制。", "power": {"status": "unmeasured", "note": "待電流／電壓量測。"}},
-    {"id": "sidestep", "label": "側向閃身 / 跨步", "groups": ["waist", "hip", "knee", "ankle"], "description": "左右起步、連續跨步與回站。",
-     "support": {"leg": {"status": "trained_history", "note": "閃身步 6,144 envs × 8,000 updates 歷史影片；本站可送新訓練。"},
-                 "wheel": {"status": "not_applicable", "note": "沒有踝與腳掌，側向移動需改以差速滑行，屬不同動作。"}},
-     "hardware": "髖 Roll 與踝 Roll 承擔側向重心轉移。", "power": {"status": "unmeasured", "note": "待量測。"}},
-    {"id": "walk", "label": "前進行走", "groups": ["waist", "hip", "knee", "ankle"], "description": "連續擺腿前進。",
-     "support": {"leg": {"status": "task_pending", "note": "task 有 walk skill（0.22 m/s 指令），本站尚未提供走路 reference。"},
-                 "wheel": {"status": "not_applicable", "note": "以滑行取代行走。"}},
-     "hardware": "膝與髖 Pitch 的擺腿力矩；腳底摩擦。", "power": {"status": "unmeasured", "note": "待量測。"}},
-    {"id": "crouch_jump", "label": "蹲起 / 起跳準備", "groups": ["waist", "hip", "knee", "ankle"], "description": "深蹲、起身與蹬伸。",
-     "support": {"leg": {"status": "store_trainable", "note": "本站 YouTube 片段辨識後可送 Spark 訓練（motion tracking）。"},
-                 "wheel": {"status": "not_applicable", "note": "膝連桿加驅動輪結構不支援離地起跳。"}},
-     "hardware": "膝關節峰值力矩與踝 Pitch 範圍；模擬限制 100 N·m。", "power": {"status": "unmeasured", "note": "完成本站訓練後提供模擬機械功（不等於電池耗電）。"}},
-    {"id": "upper_body", "label": "上肢揮動 / 功夫手部", "groups": ["waist", "shoulder", "elbow"], "description": "肩肘腰配合的揮臂、護架與出拳。",
-     "support": {"leg": {"status": "store_trainable", "note": "肩肘在 23 控制軸內；本站可送訓練，手腕手指鎖定。"},
-                 "wheel": {"status": "task_pending", "note": "有肩肘腕手軸，需接入雙輪 task adapter。"}},
-     "hardware": "肩 3 軸、肘 1 軸；雙輪另有腕與手指。", "power": {"status": "unmeasured", "note": "待量測。"}},
-    {"id": "skate", "label": "平地滑行", "groups": ["hip", "knee", "wheel"], "description": "輪速追蹤與前後滑行。",
-     "support": {"leg": {"status": "not_applicable", "note": "沒有驅動輪。"},
-                 "wheel": {"status": "trained_history", "note": "歷史 skate PPO 3,800 updates（舊契約）；新 URDF 需重新訓練。"}},
-     "hardware": "驅動輪速度控制、髖膝姿態平衡。", "power": {"status": "unmeasured", "note": "待量測。"}},
-    {"id": "turn", "label": "原地轉向", "groups": ["waist", "hip", "wheel"], "description": "改變朝向。",
-     "support": {"leg": {"status": "task_pending", "note": "需以踏步轉向 reference 訓練；本站尚未提供。"},
-                 "wheel": {"status": "trained_history", "note": "歷史滑行策略的 yaw 指令。"}},
-     "hardware": "雙輪差速；雙足需髖 Yaw 與踏步。", "power": {"status": "unmeasured", "note": "待量測。"}}
-  ]
+    {
+      "id": "stand",
+      "label": "站立平衡",
+      "groups": [
+        "waist",
+        "hip",
+        "knee",
+        "ankle"
+      ],
+      "description": "維持直立、抵抗擾動與回站。",
+      "support": {
+        "leg": {
+          "status": "trained_history",
+          "note": "歷史 stand / balance PPO；本站可用 motion tracking 重新訓練。",
+          "note_en": "Historical stand / balance PPO; retrainable here with motion tracking."
+        },
+        "wheel": {
+          "status": "trained_history",
+          "note": "歷史 skate/stand 策略（舊 24 軸契約）；需輪速平衡。",
+          "note_en": "Historical skate/stand policy (legacy 24-axis contract); needs wheel-speed balance."
+        }
+      },
+      "hardware": "下肢全部位置控制軸；雙輪另需驅動輪速度控制。",
+      "power": {
+        "status": "unmeasured",
+        "note": "待電流／電壓量測。",
+        "note_en": "Awaiting current / voltage measurement."
+      },
+      "label_en": "Standing balance",
+      "description_en": "Stay upright, resist pushes and recover.",
+      "hardware_en": "All lower-body position-control axes; wheeled also needs drive-wheel velocity control."
+    },
+    {
+      "id": "sidestep",
+      "label": "側向閃身 / 跨步",
+      "groups": [
+        "waist",
+        "hip",
+        "knee",
+        "ankle"
+      ],
+      "description": "左右起步、連續跨步與回站。",
+      "support": {
+        "leg": {
+          "status": "trained_history",
+          "note": "閃身步 6,144 envs × 8,000 updates 歷史影片；本站可送新訓練。",
+          "note_en": "Sidestep 6,144 envs × 8,000 updates historical video; new training can be sent from here."
+        },
+        "wheel": {
+          "status": "not_applicable",
+          "note": "沒有踝與腳掌，側向移動需改以差速滑行，屬不同動作。",
+          "note_en": "No ankle or foot; lateral motion becomes differential skating, a different motion."
+        }
+      },
+      "hardware": "髖 Roll 與踝 Roll 承擔側向重心轉移。",
+      "power": {
+        "status": "unmeasured",
+        "note": "待量測。",
+        "note_en": "Unmeasured."
+      },
+      "label_en": "Lateral sidestep / step",
+      "description_en": "Start left or right, step repeatedly and recover.",
+      "hardware_en": "Hip roll and ankle roll carry the lateral weight shift."
+    },
+    {
+      "id": "walk",
+      "label": "前進行走",
+      "groups": [
+        "waist",
+        "hip",
+        "knee",
+        "ankle"
+      ],
+      "description": "連續擺腿前進。",
+      "support": {
+        "leg": {
+          "status": "task_pending",
+          "note": "task 有 walk skill（0.22 m/s 指令），本站尚未提供走路 reference。",
+          "note_en": "The task has a walk skill (0.22 m/s command); this store has no walking reference yet."
+        },
+        "wheel": {
+          "status": "not_applicable",
+          "note": "以滑行取代行走。",
+          "note_en": "Skating replaces walking."
+        }
+      },
+      "hardware": "膝與髖 Pitch 的擺腿力矩；腳底摩擦。",
+      "power": {
+        "status": "unmeasured",
+        "note": "待量測。",
+        "note_en": "Unmeasured."
+      },
+      "label_en": "Forward walking",
+      "description_en": "Continuous leg swing forward.",
+      "hardware_en": "Knee and hip pitch swing torque; sole friction."
+    },
+    {
+      "id": "crouch_jump",
+      "label": "蹲起 / 起跳準備",
+      "groups": [
+        "waist",
+        "hip",
+        "knee",
+        "ankle"
+      ],
+      "description": "深蹲、起身與蹬伸。",
+      "support": {
+        "leg": {
+          "status": "store_trainable",
+          "note": "本站 YouTube 片段辨識後可送 Spark 訓練（motion tracking）。",
+          "note_en": "YouTube segments recognized here can be sent to Spark training (motion tracking)."
+        },
+        "wheel": {
+          "status": "not_applicable",
+          "note": "膝連桿加驅動輪結構不支援離地起跳。",
+          "note_en": "The knee-linkage plus drive-wheel structure cannot leave the ground."
+        }
+      },
+      "hardware": "膝關節峰值力矩與踝 Pitch 範圍；模擬限制 100 N·m。",
+      "power": {
+        "status": "unmeasured",
+        "note": "完成本站訓練後提供模擬機械功（不等於電池耗電）。",
+        "note_en": "After training here, simulated mechanical work is reported (not battery drain)."
+      },
+      "label_en": "Crouch / jump preparation",
+      "description_en": "Deep squat, stand up and push off.",
+      "hardware_en": "Knee peak torque and ankle pitch range; simulation limit 100 N·m."
+    },
+    {
+      "id": "upper_body",
+      "label": "上肢揮動 / 功夫手部",
+      "groups": [
+        "waist",
+        "shoulder",
+        "elbow"
+      ],
+      "description": "肩肘腰配合的揮臂、護架與出拳。",
+      "support": {
+        "leg": {
+          "status": "store_trainable",
+          "note": "肩肘在 23 控制軸內；本站可送訓練，手腕手指鎖定。",
+          "note_en": "Shoulder and elbow are within the 23 control axes; trainable here with wrist and fingers locked."
+        },
+        "wheel": {
+          "status": "task_pending",
+          "note": "有肩肘腕手軸，需接入雙輪 task adapter。",
+          "note_en": "Has shoulder/elbow/wrist/hand axes; needs the wheeled task adapter."
+        }
+      },
+      "hardware": "肩 3 軸、肘 1 軸；雙輪另有腕與手指。",
+      "power": {
+        "status": "unmeasured",
+        "note": "待量測。",
+        "note_en": "Unmeasured."
+      },
+      "label_en": "Arm swing / kung fu hands",
+      "description_en": "Shoulder, elbow and waist coordinated swings, guards and punches.",
+      "hardware_en": "3-axis shoulder, 1-axis elbow; wheeled also has wrist and fingers."
+    },
+    {
+      "id": "skate",
+      "label": "平地滑行",
+      "groups": [
+        "hip",
+        "knee",
+        "wheel"
+      ],
+      "description": "輪速追蹤與前後滑行。",
+      "support": {
+        "leg": {
+          "status": "not_applicable",
+          "note": "沒有驅動輪。",
+          "note_en": "No drive wheels."
+        },
+        "wheel": {
+          "status": "trained_history",
+          "note": "歷史 skate PPO 3,800 updates（舊契約）；新 URDF 需重新訓練。",
+          "note_en": "Historical skate PPO 3,800 updates (legacy contract); the new URDF needs retraining."
+        }
+      },
+      "hardware": "驅動輪速度控制、髖膝姿態平衡。",
+      "power": {
+        "status": "unmeasured",
+        "note": "待量測。",
+        "note_en": "Unmeasured."
+      },
+      "label_en": "Flat-ground skating",
+      "description_en": "Wheel-speed tracking and forward/backward skating.",
+      "hardware_en": "Drive-wheel speed control, hip/knee posture balance."
+    },
+    {
+      "id": "turn",
+      "label": "原地轉向",
+      "groups": [
+        "waist",
+        "hip",
+        "wheel"
+      ],
+      "description": "改變朝向。",
+      "support": {
+        "leg": {
+          "status": "task_pending",
+          "note": "需以踏步轉向 reference 訓練；本站尚未提供。",
+          "note_en": "Needs a stepping-turn reference for training; not provided here yet."
+        },
+        "wheel": {
+          "status": "trained_history",
+          "note": "歷史滑行策略的 yaw 指令。",
+          "note_en": "Yaw command of the historical skating policy."
+        }
+      },
+      "hardware": "雙輪差速；雙足需髖 Yaw 與踏步。",
+      "power": {
+        "status": "unmeasured",
+        "note": "待量測。",
+        "note_en": "Unmeasured."
+      },
+      "label_en": "In-place turn",
+      "description_en": "Change heading.",
+      "hardware_en": "Wheeled differential drive; biped needs hip yaw and stepping."
+    }
+  ],
+  "scope_en": "Specs come from the native URDF, public hardware component sheets and real training records on this store; real-robot performance is not validated. Power, endurance and consumption that were never measured are marked unmeasured; they are never derived from GPU power, PPO update counts or simulated joint torque.",
+  "status_legend_en": {
+    "source": "Native model or explicit setting, not a hardware measurement",
+    "command": "Control / reference command; not an actual top speed",
+    "measured": "Measured on a specific historical native simulation clip; not an overall certification",
+    "simulated": "Simulated quantity from Isaac Sim training on this store; excludes electrical losses and battery",
+    "unmeasured": "Not measured; no number is invented",
+    "unverified": "No usable validation scope established or passed yet"
+  },
+  "support_legend_en": {
+    "trained_history": "Historical PPO simulation video available",
+    "store_trainable": "Can be sent to Spark Isaac Lab real training from this store",
+    "task_pending": "Mechanically supported; needs the matching task adapter",
+    "not_applicable": "Mechanism does not support this motion"
+  }
 }

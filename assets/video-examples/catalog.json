@@ -55,7 +55,9 @@
       },
       "skeleton_source": "manual_corrected_mediapipe_reference",
       "manual_correction": true,
-      "retarget_gif_url": "/assets/video-examples/leg/h2x-guard-retarget.gif"
+      "retarget_gif_url": "/assets/video-examples/leg/h2x-guard-retarget.gif",
+      "title_en": "H2-X · guard & step",
+      "description_en": "Guard, leg lift and step reference from 00:33–00:36 of the source; used to build biped motion jobs by segment."
     },
     {
       "id": "h2x-punch",
@@ -85,7 +87,9 @@
       },
       "skeleton_source": "manual_corrected_mediapipe_reference",
       "manual_correction": true,
-      "retarget_gif_url": "/assets/video-examples/leg/h2x-punch-retarget.gif"
+      "retarget_gif_url": "/assets/video-examples/leg/h2x-punch-retarget.gif",
+      "title_en": "H2-X · side punch",
+      "description_en": "Side stance and arm motion reference from 00:36–00:39; check background people and foreground occlusion."
     },
     {
       "id": "h2x-turn-kick",
@@ -115,7 +119,9 @@
       },
       "skeleton_source": "manual_corrected_mediapipe_reference",
       "manual_correction": true,
-      "retarget_gif_url": "/assets/video-examples/leg/h2x-turn-kick-retarget.gif"
+      "retarget_gif_url": "/assets/video-examples/leg/h2x-turn-kick-retarget.gif",
+      "title_en": "H2-X · turning kick",
+      "description_en": "Turning kick reference from 00:39–00:41.8; the segment ends before the daylight transition."
     },
     {
       "id": "x2-slope",
@@ -145,7 +151,9 @@
       },
       "skeleton_source": "manual_corrected_mediapipe_reference",
       "manual_correction": true,
-      "retarget_gif_url": "/assets/video-examples/wheel/x2-slope-retarget.gif"
+      "retarget_gif_url": "/assets/video-examples/wheel/x2-slope-retarget.gif",
+      "title_en": "X2-N · slope traversal",
+      "description_en": "Wheeled slope traversal reference from 00:24–00:28; wheel speed and contact must be rebuilt separately."
     },
     {
       "id": "x2-turn",
@@ -175,7 +183,9 @@
       },
       "skeleton_source": "manual_corrected_mediapipe_reference",
       "manual_correction": true,
-      "retarget_gif_url": "/assets/video-examples/wheel/x2-turn-retarget.gif"
+      "retarget_gif_url": "/assets/video-examples/wheel/x2-turn-retarget.gif",
+      "title_en": "X2-N · hilltop turn",
+      "description_en": "Hilltop turn reference from 00:37–00:40.4; does not mean Q1 wheel has learned this motion."
     }
   ],
   "scope": "Attributed source excerpts for segment selection and Q1 training plans; not newly trained Q1 policies."

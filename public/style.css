@@ -100,3 +100,41 @@
 .ac-gf-disclaimer.muted{color:#86868b;margin-top:6px}
 @media(max-width:900px){.ac-gf-directory{grid-template-columns:1fr 1fr}.ac-gf-brand{grid-column:1/-1}}
 @media(max-width:700px){.nav-tools{gap:10px}.lang-switch button{min-width:38px;padding:4px 8px;font-size:10px}.nav-github{display:none}.ac-gf-directory{grid-template-columns:1fr;gap:18px;padding:28px 0 20px}.ac-gf-legal{flex-direction:column;align-items:flex-start}.ac-gf-legal-links a{padding:4px 10px 4px 0;border-right:0}.ac-gf-content{padding:0 16px 22px}}
+
+/* CES highlight link, hero joint panel, CES + SDK dialogs */
+.nav-highlight{color:var(--blue);font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.nav-highlight::before{content:'';width:6px;height:6px;border-radius:50%;background:#ff3b30;box-shadow:0 0 0 3px #ff3b3022}
+.hero-stage{display:block}
+.joint-panel{position:absolute;top:56px;right:16px;bottom:52px;width:236px;background:#ffffffe6;backdrop-filter:blur(14px);border:1px solid #e3e5ea;border-radius:16px;padding:12px 12px 10px;display:flex;flex-direction:column;gap:8px;z-index:3;box-shadow:0 14px 34px -24px #1d1d2f55;transition:transform .25s,opacity .25s}
+.joint-panel.collapsed{transform:translateX(calc(100% + 24px));opacity:0;pointer-events:none}
+.joint-panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.joint-panel-head strong{font-size:12px;font-weight:600;display:block}
+.joint-panel-head small{font-size:9px;color:#8a8a92;letter-spacing:.4px}
+.joint-panel-head .text-link{font-size:10px}
+#joint-filter{font-size:11px;padding:7px 10px;border-radius:8px}
+.joint-sliders{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:7px;padding-right:2px;scrollbar-width:thin}
+.joint-row{display:flex;flex-direction:column;gap:3px;font-size:10px;color:#4a4a52}
+.joint-row-head{display:flex;justify-content:space-between;gap:8px}
+.joint-row-head output{font-variant-numeric:tabular-nums;color:#8a8a92;font-size:9.5px}
+.joint-row input[type=range]{height:18px;margin:0}
+.joint-empty{font-size:10px;color:#9a9aa1;margin:8px 0}
+.joint-hint{margin:0;font-size:8.5px;line-height:1.5;color:#9a9aa1}
+.joint-toggle{position:absolute;right:16px;top:20px;z-index:4;font-size:10px;color:var(--blue);background:#ffffffd9;border:1px solid #e3e5ea;border-radius:980px;padding:5px 10px;backdrop-filter:blur(8px)}
+.hero-stage-top{right:150px}
+.media-dialog{max-width:900px;width:min(92vw,900px)}
+.media-dialog video{width:100%;aspect-ratio:16/9;background:#000;border-radius:14px;display:block;margin:6px 0 14px}
+.ces-note{font-size:11px;color:var(--muted);margin:0;line-height:1.7}
+.sdk-dialog{max-width:760px;width:min(92vw,760px)}
+.sdk-lead{font-size:13px;line-height:1.8;color:#4a4a52;margin:0 0 20px}
+.sdk-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:22px;margin-bottom:22px}
+.sdk-grid h3,.sdk-contact h3{font-size:13px;font-weight:600;margin:0 0 10px}
+.sdk-grid p{font-size:11.5px;line-height:1.8;color:#5c5c63;margin:0}
+.sdk-usecases{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.sdk-usecases li{display:flex;gap:10px;font-size:11.5px;line-height:1.6;color:#3a3a40}
+.sdk-usecases li span:first-child{width:22px;flex-shrink:0;text-align:center}
+.sdk-contact{background:#f5f5f7;border-radius:14px;padding:18px}
+.sdk-contact p{font-size:11.5px;line-height:1.8;color:#5c5c63;margin:0 0 14px}
+.sdk-actions{display:flex;gap:10px;flex-wrap:wrap}
+.sdk-sales-note{font-size:10px;color:#8a8a92;margin:10px 0 0!important}
+@media(max-width:1000px){.joint-panel{width:210px}}
+@media(max-width:700px){.hero-stage{height:auto;min-height:350px;padding-bottom:0}#hero-viewer{height:350px}.hero-stage-top{right:15px}.joint-toggle{display:none}.joint-panel{position:static;width:auto;margin:0 0 12px;max-height:280px;transform:none;opacity:1;pointer-events:auto;background:#fff}.joint-panel.collapsed{transform:none;opacity:1;pointer-events:auto}.hero-stage-bottom{position:static;padding:12px 15px 15px}.sdk-grid{grid-template-columns:1fr}.nav nav{overflow-x:auto;white-space:nowrap;max-width:60vw;scrollbar-width:none}}

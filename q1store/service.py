@@ -33,20 +33,20 @@ PHYSICS = [
     {"id": "ovphysx", "label": "OV PhysX · standalone"},
 ]
 REWARDS = [
-    {"id": "motion_tracking", "label": "動作追蹤"},
-    {"id": "joint_position", "label": "關節位置"},
-    {"id": "balance", "label": "平衡與姿態"},
-    {"id": "energy", "label": "能耗與力矩"},
-    {"id": "smoothness", "label": "動作平滑"},
-    {"id": "foot_contact", "label": "足部接觸"},
-    {"id": "wheel_velocity", "label": "輪速追蹤"},
+    {"id": "motion_tracking", "label": "動作追蹤", "label_en": "Motion tracking"},
+    {"id": "joint_position", "label": "關節位置", "label_en": "Joint position"},
+    {"id": "balance", "label": "平衡與姿態", "label_en": "Balance & posture"},
+    {"id": "energy", "label": "能耗與力矩", "label_en": "Energy & torque"},
+    {"id": "smoothness", "label": "動作平滑", "label_en": "Smoothness"},
+    {"id": "foot_contact", "label": "足部接觸", "label_en": "Foot contact"},
+    {"id": "wheel_velocity", "label": "輪速追蹤", "label_en": "Wheel velocity tracking"},
 ]
 LANDMARKS = [
-    {"id": "taipei101", "label": "台北 101 · Taipei"},
-    {"id": "eiffel", "label": "艾菲爾鐵塔 · Paris"},
-    {"id": "times-square", "label": "時代廣場 · New York"},
-    {"id": "shibuya", "label": "澀谷路口 · Tokyo"},
-    {"id": "great-wall", "label": "萬里長城 · Beijing"},
+    {"id": "taipei101", "label": "台北 101 · Taipei", "label_en": "Taipei 101 · Taipei"},
+    {"id": "eiffel", "label": "艾菲爾鐵塔 · Paris", "label_en": "Eiffel Tower · Paris"},
+    {"id": "times-square", "label": "時代廣場 · New York", "label_en": "Times Square · New York"},
+    {"id": "shibuya", "label": "澀谷路口 · Tokyo", "label_en": "Shibuya Crossing · Tokyo"},
+    {"id": "great-wall", "label": "萬里長城 · Beijing", "label_en": "Great Wall · Beijing"},
 ]
 DEMO_DURATION = 30
 WORKER_HEARTBEAT_MAX_AGE = 90
@@ -226,6 +226,7 @@ class Store:
                 "video_segments": True, "segment_min_s": .5, "segment_max_s": 60,
                 "payments": "demo_only", "training": "demo_or_spark_gpu_worker",
                 "robot_registry": True, "deployment_download": True, "hardware_delivery": False,
+                "sales_email": os.environ.get("Q1_SALES_EMAIL", ""),
                 "physics_scope": "Spark worker 以 Isaac Sim PhysX + RSL-RL PPO 執行雙足工作；其他選項保留為規劃並記錄在工作 JSON。",
                 "rewards_scope": "Q1 任務的 reward 設計預設，並非所有 Isaac Lab 任務的通用選項。",
             },
@@ -279,12 +280,12 @@ class Store:
             entry["urdf"] = facts
             if facts.get("available"):
                 entry.setdefault("specs", []).extend([
-                    {"id": "mass", "label": "模型質量", "value": facts["mass_kg"], "unit": "kg", "status": "source",
-                     "source": robots[robot_type].get("urdf_url"), "note": "URDF inertial mass 總和，是模型質量不是實機秤重。"},
-                    {"id": "control", "label": "控制關節", "value": f"{facts['control_joints']} / {facts['movable_joints']}", "unit": "軸",
-                     "status": "source", "source": "/assets/robots/manifest.json", "note": "策略 action 軸數／原生 URDF 可動關節數。"},
-                    {"id": "limits", "label": "關節限制（模擬）", "value": " · ".join(f"{v:g} N·m" for v in facts["effort_limits_nm"]) + " / " + " · ".join(f"{v:g} rad/s" for v in facts["velocity_limits_rad_s"]),
-                     "unit": "", "status": "source", "source": robots[robot_type].get("urdf_url"), "note": "URDF limit 的 effort / velocity 設定值，不是馬達實測。"},
+                    {"id": "mass", "label": "模型質量", "label_en": "Model mass", "value": facts["mass_kg"], "unit": "kg", "status": "source",
+                     "source": robots[robot_type].get("urdf_url"), "note": "URDF inertial mass 總和，是模型質量不是實機秤重。", "note_en": "Sum of URDF inertial masses; model mass, not a weighed robot."},
+                    {"id": "control", "label": "控制關節", "label_en": "Control joints", "value": f"{facts['control_joints']} / {facts['movable_joints']}", "unit": "軸", "unit_en": "axes",
+                     "status": "source", "source": "/assets/robots/manifest.json", "note": "策略 action 軸數／原生 URDF 可動關節數。", "note_en": "Policy action axes / movable joints in the native URDF."},
+                    {"id": "limits", "label": "關節限制（模擬）", "label_en": "Joint limits (simulation)", "value": " · ".join(f"{v:g} N·m" for v in facts["effort_limits_nm"]) + " / " + " · ".join(f"{v:g} rad/s" for v in facts["velocity_limits_rad_s"]),
+                     "unit": "", "status": "source", "source": robots[robot_type].get("urdf_url"), "note": "URDF limit 的 effort / velocity 設定值，不是馬達實測。", "note_en": "URDF limit effort / velocity settings, not motor measurements."},
                 ])
         trained = []
         for job in self.all("jobs"):

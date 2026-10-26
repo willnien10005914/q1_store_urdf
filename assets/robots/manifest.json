@@ -517,7 +517,8 @@
         "right_shoulder_Roll_joint": 0.0,
         "right_shoulder_Yaw_joint": 0.0,
         "right_elbow_Pitch_joint": 0.15
-      }
+      },
+      "label_en": "BIPED"
     },
     {
       "id": "wheel",
@@ -1014,7 +1015,8 @@
         "right_knee_1_Pitch_joint": 0.7,
         "left_wheel_Pitch_joint": 0.0,
         "right_wheel_Pitch_joint": 0.0
-      }
+      },
+      "label_en": "WHEELED"
     }
   ]
 }

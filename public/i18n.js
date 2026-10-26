@@ -7,6 +7,38 @@ const STRINGS = {
     document_title: 'Q1 Store — 每段影片，都有下一個動作。',
     meta_description: '從影片到 Q1。探索雙足與雙輪機器人，體驗 MediaPipe 動作轉錄、Isaac Lab 3 訓練設計與動作市集。',
     nav_home: 'Q1 Store 首頁',
+    nav_ces: 'CES 2027 Highlight',
+    nav_sdk: 'SDK Download',
+    ces_eyebrow: 'CES 2027 / QUANTA Q1 HIGHLIGHT',
+    ces_title: 'Q1 在 CES 2027。',
+    ces_note: '靜音播放的精華片段；影片保存在這台 Spark 與 GitHub repository。',
+    ces_close: '關閉 CES 影片',
+    sdk_eyebrow: 'Q1 SDK / VLA SECONDARY DEVELOPMENT',
+    sdk_title: '下載 SDK，客製你的 Q1 技能。',
+    sdk_lead: 'Q1 SDK 提供 VLA（Vision-Language-Action）二次開發介面：以自然語言與示範資料客製技能，部署到雙足或雙輪 Q1。',
+    sdk_usecases_title: '適用場域',
+    sdk_uc_logistics: '物流送貨 · 倉儲揀貨、樓層遞送、最後一哩',
+    sdk_uc_home: '家用打掃 · 整理、擦拭、收納與陪伴互動',
+    sdk_uc_factory: '工廠 Inspection · 巡檢、儀表讀取、異常回報',
+    sdk_uc_survey: 'Survey · 場域量測、資產盤點、安全巡查',
+    sdk_uc_others: '其他 · 零售補貨、醫療後勤、展演導覽',
+    sdk_ref_title: '參考業界做法',
+    sdk_ref_body: '如 Figure AI（Helix VLA）、Agility Robotics（Digit 的 Arc 平台）與 1X（NEO）皆以 VLA 模型加上開發者 SDK 讓夥伴自訂任務；Q1 SDK 採相同路線：下載 SDK，即可以自己的資料與場景客製技能。',
+    sdk_contact_title: '請聯絡 Sales 取得 SDK',
+    sdk_contact_body: 'SDK 需要簽署評估合約後發放。請提供公司、場域、目標任務與預計台數，Quanta Sales 會安排 SDK 下載與技術對接。',
+    sdk_contact_button: '聯絡 Sales ↗',
+    sdk_contact_copy: '複製需求範本',
+    sdk_copied: '已複製需求範本，貼到你的郵件即可。',
+    sdk_close: '關閉 SDK',
+    sdk_mail_subject: 'Q1 SDK 下載申請（VLA 二次開發）',
+    sdk_mail_body: '您好，\n\n我們想申請 Q1 SDK 進行 VLA 二次開發。\n公司／單位：\n目標場域（物流送貨／家用打掃／工廠 inspection／survey／其他）：\n目標任務：\n機型（雙足 Q1 Leg／雙輪 Q1 Wheel）：\n預計台數與時程：\n聯絡人與電話：\n\n謝謝。',
+    joints_title: '試轉關節',
+    joints_hint: '拖曳滑桿即時改變載入 URDF 的關節角度；僅幾何預覽，不含物理。',
+    joints_reset: '回到站姿',
+    joints_search: '搜尋關節',
+    joints_none: '尚未載入關節',
+    joints_toggle_show: '關節控制 ▸',
+    joints_toggle_hide: '關節控制 ◂',
     nav_specs: '規格比較',
     nav_studio: '創作工作室',
     nav_collection: '探索動作',
@@ -24,6 +56,7 @@ const STRINGS = {
     hero_create: '創作你的動作',
     hero_explore: '探索動作系列 ›',
     hero_loading: '正在載入 Q1 模型…',
+    hero_pill: '原生 URDF · 互動 3D',
     hero_hint: '拖曳旋轉 · 滾輪縮放',
     hero_switch_wheel: '切換為雙輪 ↔',
     hero_switch_leg: '切換為雙足 ↔',
@@ -242,6 +275,38 @@ const STRINGS = {
     document_title: 'Q1 Store — Every clip has a next motion.',
     meta_description: 'From video to Q1. Explore biped and wheeled robots, MediaPipe motion capture, Isaac Lab 3 training design, and a motion marketplace.',
     nav_home: 'Q1 Store home',
+    nav_ces: 'CES 2027 Highlight',
+    nav_sdk: 'SDK Download',
+    ces_eyebrow: 'CES 2027 / QUANTA Q1 HIGHLIGHT',
+    ces_title: 'Q1 at CES 2027.',
+    ces_note: 'Muted highlight reel; the file is stored on this Spark and in the GitHub repository.',
+    ces_close: 'Close CES video',
+    sdk_eyebrow: 'Q1 SDK / VLA SECONDARY DEVELOPMENT',
+    sdk_title: 'Download the SDK. Customize Q1 skills.',
+    sdk_lead: 'The Q1 SDK exposes a VLA (Vision-Language-Action) development interface: customize skills with natural language and demonstration data, then deploy to biped or wheeled Q1.',
+    sdk_usecases_title: 'Target domains',
+    sdk_uc_logistics: 'Logistics delivery · warehouse picking, floor-to-floor delivery, last mile',
+    sdk_uc_home: 'Home cleaning · tidying, wiping, storage and companionship',
+    sdk_uc_factory: 'Factory inspection · patrols, gauge reading, anomaly reporting',
+    sdk_uc_survey: 'Survey · site measurement, asset inventory, safety rounds',
+    sdk_uc_others: 'Others · retail restocking, hospital logistics, exhibition guiding',
+    sdk_ref_title: 'Industry reference',
+    sdk_ref_body: 'Figure AI (Helix VLA), Agility Robotics (Digit on the Arc platform) and 1X (NEO) all pair a VLA model with a developer SDK so partners can define their own tasks. The Q1 SDK follows the same path: download it and customize skills with your own data and scenes.',
+    sdk_contact_title: 'Contact Sales for the SDK',
+    sdk_contact_body: 'The SDK is released under an evaluation agreement. Share your company, domain, target tasks and expected fleet size; Quanta Sales will arrange the SDK download and technical onboarding.',
+    sdk_contact_button: 'Contact Sales ↗',
+    sdk_contact_copy: 'Copy request template',
+    sdk_copied: 'Request template copied; paste it into your email.',
+    sdk_close: 'Close SDK',
+    sdk_mail_subject: 'Q1 SDK download request (VLA secondary development)',
+    sdk_mail_body: 'Hello,\n\nWe would like to request the Q1 SDK for VLA secondary development.\nCompany / team:\nTarget domain (logistics delivery / home cleaning / factory inspection / survey / other):\nTarget tasks:\nRobot (biped Q1 Leg / wheeled Q1 Wheel):\nExpected units and timeline:\nContact and phone:\n\nThank you.',
+    joints_title: 'Try the joints',
+    joints_hint: 'Drag a slider to move a joint of the loaded URDF in real time; geometry only, no physics.',
+    joints_reset: 'Reset to stand',
+    joints_search: 'Search joints',
+    joints_none: 'No joints loaded yet',
+    joints_toggle_show: 'Joint controls ▸',
+    joints_toggle_hide: 'Joint controls ◂',
     nav_specs: 'Compare specs',
     nav_studio: 'Motion Studio',
     nav_collection: 'Explore motions',
@@ -259,6 +324,7 @@ const STRINGS = {
     hero_create: 'Create a motion',
     hero_explore: 'Explore the collection ›',
     hero_loading: 'Loading Q1 model…',
+    hero_pill: 'Native URDF · interactive 3D',
     hero_hint: 'Drag to orbit · scroll to zoom',
     hero_switch_wheel: 'Switch to wheeled ↔',
     hero_switch_leg: 'Switch to biped ↔',
@@ -479,6 +545,21 @@ let locale = 'zh-Hant';
 
 export function getLocale() {
   return locale;
+}
+
+/** Inline bilingual literal: returns `en` when the UI is English, else `zh`. */
+export function tr(zh, en) {
+  return locale === 'en' && en != null ? en : zh;
+}
+
+/** Catalog field lookup: prefers `<key>_en` when the UI is English. */
+export function L(obj, key) {
+  if (!obj) return undefined;
+  if (locale === 'en') {
+    const value = obj[key + '_en'];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return obj[key];
 }
 
 export function localeTag() {

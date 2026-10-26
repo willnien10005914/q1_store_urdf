@@ -14,7 +14,10 @@
       "provenance": "歷史原生 Isaac Sim / PhysX PPO · 6,144 envs × 8,000 updates · selected model_7800",
       "status": "simulation_evaluated",
       "checkpoint": "checkpoints/isaac/sidestep/latest.pt",
-      "compatible_with_current_urdf": true
+      "compatible_with_current_urdf": true,
+      "title_en": "Q1 Sidestep",
+      "description_en": "Native PhysX PPO sidestep recording; independent simulation evaluation survived 31/32 episodes, not yet validated on hardware.",
+      "provenance_en": "Historical native Isaac Sim / PhysX PPO · 6,144 envs × 8,000 updates · selected model_7800"
     },
     {
       "id": "wheel-skate-legacy",
@@ -28,7 +31,10 @@
       "provenance": "歷史 Isaac Sim / RSL-RL PPO · 3,800 updates · legacy 24-action contract",
       "status": "legacy_recording",
       "checkpoint": "checkpoints/q1_skate_ppo.pt",
-      "compatible_with_current_urdf": false
+      "compatible_with_current_urdf": false,
+      "title_en": "Q1 Skate · historical skating PPO",
+      "description_en": "Real historical training video of wheeled skating. Legacy 24-axis model, not compatible with the current native 23-axis URDF.",
+      "provenance_en": "Historical Isaac Sim / RSL-RL PPO · 3,800 updates · legacy 24-action contract"
     }
   ]
 }
