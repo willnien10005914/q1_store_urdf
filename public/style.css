@@ -66,3 +66,5 @@
 @media (max-width:860px){.training-stats{grid-template-columns:repeat(2,1fr)}}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .jobs-shortcut{cursor:pointer;border:1px solid #cfe0f7;background:#eef5ff;color:#1d4f8f;margin-left:8px}
+
+.job-log-note{display:block;color:#8a8a92;font-size:9.5px;line-height:1.5;margin:6px 0 4px}
