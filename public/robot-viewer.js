@@ -100,14 +100,22 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
     }
     return q;
   }
+  function loadingLabel(){
+    let label=container.querySelector(':scope > .loading-model');
+    if(!label){label=document.createElement('div');label.className='loading-model';container.append(label);}
+    label.hidden=false;return label;
+  }
   async function loadRobot(entry){
-    const token=++loadToken;manifest=entry;container.dataset.modelReady='false';onStatus(tr('正在載入原生 URDF 與 meshes…','Loading native URDF and meshes…'));
+    const token=++loadToken;manifest=entry;container.dataset.modelReady='false';
+    const showProgress=()=>{const text=`${tr('正在載入 Q1 模型','Loading Q1 model')} ${finished}/${Math.max(started,1)}`;loadingLabel().textContent=text;onStatus(text);};
+    const shownAt=performance.now();
+    loadingLabel().textContent=tr('正在載入原生 URDF 與 meshes…','Loading native URDF and meshes…');onStatus(loadingLabel().textContent);
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     let loaded;
     const manager=new THREE.LoadingManager();
     const loader=new URDFLoader(manager);loader.parseCollision=false;
     const meshLoads=[];
     let started=0,finished=0;
-    const showProgress=()=>{const text=`${tr('正在載入 Q1 模型','Loading Q1 model')} ${finished}/${Math.max(started,1)}`;document.querySelectorAll('.loading-model').forEach(label=>{label.textContent=text;});onStatus(text);};
     // FileLoader shares pending URLs across viewers without accounting for the
     // second LoadingManager. Wait for each actual mesh attachment instead.
     loader.loadMeshCb=(path,loadingManager,done)=>{
@@ -129,7 +137,7 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       setJoints(demoPose(0));robot.updateMatrixWorld(true);bounds.setFromObject(robot);
       if(bounds.isEmpty()||!Number.isFinite(bounds.min.z)||!Number.isFinite(bounds.max.z))throw new Error(tr('原生模型的 mesh 或姿態範圍無效。','Native model mesh or pose bounds are invalid.'));
       robot.position.z-=bounds.min.z;
-      fit();container.querySelectorAll('.loading-model').forEach(element=>element.remove());renderer.render(scene,camera);container.dataset.modelReady='true';container.dataset.robotType=entry.id;container.dataset.meshCount=String(meshLoads.length);onStatus(`${entry.name||entry.label||entry.id} · ${tr('原生 URDF 幾何預覽','native URDF geometry preview')}`);return api;
+      fit();const remain=Math.max(0,450-(performance.now()-shownAt));if(remain)await new Promise(resolve=>setTimeout(resolve,remain));if(disposed||token!==loadToken)return api;container.querySelectorAll('.loading-model').forEach(element=>element.remove());renderer.render(scene,camera);container.dataset.modelReady='true';container.dataset.robotType=entry.id;container.dataset.meshCount=String(meshLoads.length);onStatus(`${entry.name||entry.label||entry.id} · ${tr('原生 URDF 幾何預覽','native URDF geometry preview')}`);return api;
     }catch(error){if(loaded){scene.remove(loaded);disposeModel(loaded);if(loaded===robot)robot=null;}onStatus(tr('模型載入失敗：','Model load failed: ')+error.message);throw error;}
   }
   function animate(now){
