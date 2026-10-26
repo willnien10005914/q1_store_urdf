@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run the Spark GPU worker that trains queued Q1 Store jobs in Isaac Lab.
-#   Q1_LEG_ROOT=~/will/q1_leg_urdf Q1_WORKER_NUM_ENVS=2048 scripts/worker.sh
+# Env count follows the job budget: 4 h = 1024, each extra hour adds 1024.
+#   Q1_LEG_ROOT=~/will/q1_leg_urdf scripts/worker.sh
 set -euo pipefail
 Q1_STORE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 Q1_STORE_PYTHON="${Q1_STORE_PYTHON:-python3}"

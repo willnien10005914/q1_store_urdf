@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from .service import Store
+from .service import Store, num_envs_for_hours
 
 RUNNING_STATES = ("preparing", "waiting_for_gpu", "starting_isaac", "training", "evaluating", "recording")
 STAGE_LABELS = {
@@ -27,6 +27,19 @@ STAGE_LABELS = {
     "recording": "錄製結果影片與 rollout", "complete": "訓練完成", "failed": "訓練失敗", "cancelled": "工作已取消",
 }
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def envs_for_job(job):
+    """Env count stored on the job, or the hour schedule for jobs created before it."""
+    config = job.get("config") or {}
+    recorded = config.get("num_envs")
+    if isinstance(recorded, (int, float)) and not isinstance(recorded, bool) and recorded > 0 and float(recorded).is_integer():
+        return int(recorded)
+    try:
+        hours = float(config.get("hours", 4))
+    except (TypeError, ValueError):
+        hours = 4.0
+    return num_envs_for_hours(hours)
 POST_TRAINING_S = 420.  # Isaac startup for evaluation/recording after the budget ends.
 
 
@@ -80,7 +93,10 @@ class Worker:
         self.root = self.store.root
         self.leg_root = Path(leg_root or os.environ.get("Q1_LEG_ROOT") or Path.home() / "will/q1_leg_urdf").resolve()
         self.lock_path = Path(os.environ.get("Q1_GPU_LOCK") or self.leg_root.parent / ".spark-training-gpu.lock")
-        self.num_envs = int(num_envs or os.environ.get("Q1_WORKER_NUM_ENVS") or 2048)
+        # Env count comes from the job's hour schedule (4 h = 1024, +1024 per extra hour).
+        # A stale Q1_WORKER_NUM_ENVS or --num-envs must not force every job back to 2048.
+        self.num_envs_override = int(num_envs) if num_envs else None
+        self.active_envs = None
         # Operator cap on a single job's training budget (seconds); jobs keep their requested hours in the plan.
         self.max_budget_s = float(os.environ.get("Q1_WORKER_MAX_BUDGET_S") or 0) or None
         self.poll_s = poll_s
@@ -96,7 +112,7 @@ class Worker:
     # ----------------------------------------------------------------- state
     def heartbeat(self, state, job_id=None, **extra):
         payload = {"pid": os.getpid(), "state": state, "job_id": job_id, "updated_at": self.clock(),
-                   "num_envs": self.num_envs, "leg_root": str(self.leg_root), "gpu_lock": str(self.lock_path), **extra}
+                   "num_envs": self.active_envs, "leg_root": str(self.leg_root), "gpu_lock": str(self.lock_path), **extra}
         tmp = self.heartbeat_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False))
         os.replace(tmp, self.heartbeat_path)
@@ -134,7 +150,10 @@ class Worker:
         return stale + queued
 
     def run_forever(self):
-        print(f"Q1 Store worker: leg_root={self.leg_root} num_envs={self.num_envs} data={self.store.data_dir}", flush=True)
+        fixed = self.num_envs_override or os.environ.get("Q1_WORKER_NUM_ENVS")
+        if fixed:
+            print(f"Q1 Store worker: ignoring fixed num_envs={fixed}; envs follow each job's hours.", flush=True)
+        print(f"Q1 Store worker: leg_root={self.leg_root} envs=1024 at 4h, +1024 per extra hour data={self.store.data_dir}", flush=True)
         while True:
             try:
                 if not self.run_once():
@@ -175,18 +194,20 @@ class Worker:
         budget = float(job["config"].get("hours", 2)) * 3600.
         if self.max_budget_s:
             budget = min(budget, self.max_budget_s)
-        training.update(worker_pid=os.getpid(), num_envs=self.num_envs, job_dir=str(directory), budget_s=budget,
+        envs = envs_for_job(job)
+        self.active_envs = envs
+        training.update(worker_pid=os.getpid(), num_envs=envs, job_dir=str(directory), budget_s=budget,
                         budget_capped=bool(self.max_budget_s and budget < float(job["config"].get("hours", 2)) * 3600.),
                         started_at=training.get("started_at") or self.clock())
         self.update(job_id, state="preparing", training=training, error=None)
-        self.events(job_id, "worker 接手工作", num_envs=self.num_envs)
+        self.events(job_id, "worker 接手工作", num_envs=envs)
         try:
             if not self.acquire_gpu(job_id):
                 return
             if not (directory / "evaluation.json").exists():
                 resume = (directory / "latest.pt").exists()
                 code = self.run_phase(job_id, "train", ["--motion", str(directory / "motion.json"), "--budget-seconds", str(training["budget_s"]),
-                                                       "--num_envs", str(self.num_envs)] + (["--resume"] if resume else []))
+                                                       "--num_envs", str(envs)] + (["--resume"] if resume else []))
                 if code is None:
                     return
                 if code != 0:
@@ -202,6 +223,7 @@ class Worker:
                         self.run_phase(job_id, "record", [])
             self.finish(job_id)
         finally:
+            self.active_envs = None
             self.release_gpu()
 
     def acquire_gpu(self, job_id):

@@ -67,6 +67,52 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(finished["result"]["landmark_rendered"])
         self.assertEqual(finished["result"]["video_url"], "/assets/examples/leg.mp4")
 
+    def test_num_envs_scale_with_hours_and_ignore_a_fixed_override(self):
+        from q1store.service import num_envs_for_hours
+        from q1store.worker import Worker, envs_for_job
+        self.assertEqual([num_envs_for_hours(h) for h in (1, 3, 4, 4.9, 5, 6, 7, 24)],
+                         [1024, 1024, 1024, 1024, 2048, 3072, 4096, 21504])
+        base = self.payload()["config"]
+        for hours, envs in ((4, 1024), (5, 2048), (6, 3072)):
+            job = self.store.create_job(self.payload(config={**base, "hours": hours, "num_envs": 99999}))
+            self.assertEqual(job["config"]["num_envs"], envs)
+            self.assertEqual(job["plan"]["num_envs"], envs)
+            self.assertEqual(job["plan"]["config"]["num_envs"], envs)
+        os_env = __import__("os").environ
+        previous = os_env.get("Q1_WORKER_NUM_ENVS")
+        os_env["Q1_WORKER_NUM_ENVS"] = "2048"
+        try:
+            motion_id = self.store.create_motion(self.motion())["id"]
+            job = self.store.create_job(self.payload(mode="worker", motion_id=motion_id, config={**base, "hours": 6}))
+            worker = Worker(self.root, leg_root=self.root, num_envs=64, clock=lambda: self.now)
+            self.assertEqual(envs_for_job(job), 3072)
+            captured = {}
+
+            def run_phase(job_id, phase, extra):
+                captured[phase] = list(extra)
+                directory = worker.job_dir(job_id)
+                if phase == "train":
+                    (directory / "evaluation.json").write_text(json.dumps({"num_envs": 3072, "iterations": 1, "passed": False}))
+                if phase == "record":
+                    (directory / "record.json").write_text("{}")
+                return 0
+
+            worker.acquire_gpu = lambda job_id: True
+            worker.release_gpu = lambda: None
+            worker.run_phase = run_phase
+            self.assertTrue(worker.run_once())
+            self.assertIn("3072", captured["train"])
+            self.assertEqual(captured["train"][captured["train"].index("--num_envs") + 1], "3072")
+            finished = self.store.job(job["id"])
+            self.assertEqual(finished["training"]["num_envs"], 3072)
+            self.assertEqual(finished["state"], "complete")
+            self.assertIsNone(worker.active_envs)
+        finally:
+            if previous is None:
+                os_env.pop("Q1_WORKER_NUM_ENVS", None)
+            else:
+                os_env["Q1_WORKER_NUM_ENVS"] = previous
+
     def test_worker_never_completes_without_actual_worker(self):
         job = self.store.create_job(self.payload(mode="worker"))
         self.now += 100000
@@ -80,6 +126,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(future["plan"]["robot"]["source_commit"], "abc123")
         self.assertEqual(len(future["plan"]["robot"]["urdf_sha256"]), 64)
         self.assertEqual(future["plan"]["config"]["physics"], "isaacsim_physx")
+        self.assertEqual(future["config"]["num_envs"], 1024)
+        self.assertEqual(future["plan"]["num_envs"], 1024)
+        self.assertEqual(future["training"]["num_envs"], 1024)
 
     def test_kungfu_procedural_source_is_explicit_without_fake_video(self):
         job = self.store.create_job(self.payload(source={"type": "example", "id": "kungfu-demo"}))

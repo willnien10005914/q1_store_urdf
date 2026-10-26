@@ -160,3 +160,9 @@
 .sdk-sales-note:empty{display:none}
 @media(max-width:1000px){.joint-panel{width:210px}}
 @media(max-width:700px){.hero-stage{height:auto;min-height:350px;padding-bottom:0}#hero-viewer{height:350px}.hero-stage-top{right:15px}.joint-toggle{display:inline-flex;position:absolute;top:12px;right:12px}.joint-panel{position:static;width:auto;margin:0 12px 12px;max-height:280px;background:#fff}.joint-panel.collapsed{display:none}#panel-training .panel-bottom,#panel-world .panel-bottom{margin-left:-15px;margin-right:-15px;margin-bottom:-15px;padding:14px 15px}.hero-stage-bottom{position:static;padding:12px 15px 15px}.sdk-ribbon{height:120px}.sdk-slice{--sdk-slant:18px;--sdk-seam-turn:8.53deg;margin-left:-18px}.sdk-slice:first-child{margin-left:0}.sdk-photo span{font-size:11px;left:24px}.sdk-slice:first-child .sdk-photo span{left:10px}.sdk-body{padding:12px 14px}.sdk-body h2{font-size:20px}.sdk-teach{gap:8px}.sdk-teach p{font-size:11px}.nav nav{overflow-x:auto;white-space:nowrap;max-width:60vw;scrollbar-width:none}}
+.train-params-title{display:block;font-size:10px;letter-spacing:1.2px;color:#999;font-weight:600;text-transform:uppercase}
+.train-params{display:grid;gap:6px;margin:8px 0 12px}
+.train-params div{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:baseline}
+.train-params dt{margin:0;color:#8a8a92;font-weight:500}
+.train-params dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums}
+#param-envs{font-size:16px;letter-spacing:-.3px}

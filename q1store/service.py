@@ -61,6 +61,16 @@ MAX_MOTION_FRAMES = 18000
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".m4v"}
 
 
+def num_envs_for_hours(hours):
+    """Parallel Isaac environments for a training budget.
+
+    Four hours is the 1024-env baseline. Each additional whole hour adds 1024
+    (5 h → 2048, 6 h → 3072). Budgets under four hours stay at 1024.
+    """
+    whole = math.floor(float(hours))
+    return max(1, whole - 3) * 1024
+
+
 class APIError(ValueError):
     def __init__(self, message, status=400):
         super().__init__(message)
@@ -668,6 +678,7 @@ class Store:
         if not math.isfinite(hours) or not .25 <= hours <= 72:
             raise APIError("訓練規劃為 0.25 至 72 小時。")
         config["hours"] = hours
+        config["num_envs"] = num_envs_for_hours(hours)
         rewards = config.get("rewards", ["motion_tracking", "balance", "smoothness"])
         allowed = {r["id"] for r in REWARDS}
         if not isinstance(rewards, list) or not rewards or any(not isinstance(r, str) or r not in allowed for r in rewards):
@@ -719,7 +730,7 @@ class Store:
         if mode == "worker":
             trainable = robot == "leg" and bool(motion)
             job["stage_label"] = "等待 Spark GPU worker"
-            job["training"] = {"budget_s": hours * 3600., "trainable": trainable,
+            job["training"] = {"budget_s": hours * 3600., "num_envs": config["num_envs"], "trainable": trainable,
                                "blocker": None if trainable else ("雙輪 Isaac Lab 任務尚未接入" if robot != "leg" else "缺少 MediaPipe 關節參考")}
             job["plan"]["executor"] = "q1_store_worker" if trainable else None
             job["plan"]["trainable"] = trainable
@@ -751,7 +762,7 @@ class Store:
         return {"schema": "q1-store.worker.v1", "task": task, "task_registered": False,
                 "robot_type": robot, "robot": robot_reference, "config": dict(config),
                 "train_command": train, "play_command": play, "source": source, "target_person": target,
-                "budget_hours": config["hours"], "rewards": config["rewards"], "landmark": config["landmark"],
+                "budget_hours": config["hours"], "num_envs": config["num_envs"], "rewards": config["rewards"], "landmark": config["landmark"],
                 "requires": ["安裝並註冊 Q1 Isaac Lab 3 任務 adapter", "以選定人物的 MediaPipe 關節資料產生 motion reference",
                              "將 reward 預設映射至任務 RewardTermCfg", "驗證所選 physics preset 與 checkpoint 相容",
                              "準備授權地標 USD 場景與 RTX camera", "錄製實際 checkpoint 的 rollout 並附評估證據"],
