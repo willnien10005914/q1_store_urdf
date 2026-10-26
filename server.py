@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import argparse
 from functools import partial
+import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 from pathlib import Path
 import re
+import threading
 from urllib.parse import unquote, urlsplit
 
 from q1store.service import APIError, MAX_MOTION, MAX_UPLOAD, Store, VIDEO_EXTENSIONS
 
 ROOT = Path(__file__).resolve().parent
 MAX_JSON = 2 * 1024 * 1024
+GZIP_SUFFIXES = {".js", ".css", ".stl", ".urdf", ".json", ".svg"}
+GZIP_CACHE = {}
+GZIP_LOCK = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -115,6 +120,23 @@ class Handler(BaseHTTPRequestHandler):
             raise APIError("找不到檔案。", 404)
         self.serve_file(file_path, head)
 
+    def compressed_body(self, path):
+        if path.suffix.lower() not in GZIP_SUFFIXES or "gzip" not in (self.headers.get("Accept-Encoding") or "").lower():
+            return None
+        if self.headers.get("Range"):
+            return None
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        with GZIP_LOCK:
+            cached = GZIP_CACHE.get(key)
+        if cached is None:
+            cached = gzip.compress(path.read_bytes(), compresslevel=1)
+            with GZIP_LOCK:
+                if len(GZIP_CACHE) > 80:
+                    GZIP_CACHE.clear()
+                GZIP_CACHE[key] = cached
+        return cached
+
     def serve_file(self, path, head=False):
         size = path.stat().st_size
         start, end, status = 0, size - 1, 200
@@ -140,26 +162,42 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             status = 206
+        compressed = None if status == 206 else self.compressed_body(path)
+        body_size = len(compressed) if compressed is not None else max(0, end - start + 1)
+        suffix = path.suffix.lower()
+        if suffix in {".stl", ".urdf", ".jpg", ".png", ".gif", ".mp4", ".webm"}:
+            cache = "public, max-age=86400"
+        elif suffix in {".js", ".css"}:
+            cache = "public, max-age=60"
+        else:
+            cache = "no-cache"
         self.send_response(status)
         content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(max(0, end - start + 1)))
+        self.send_header("Content-Length", str(body_size))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", cache)
+        self.send_header("Vary", "Accept-Encoding")
+        if compressed is not None:
+            self.send_header("Content-Encoding", "gzip")
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
-        if not head:
-            with path.open("rb") as stream:
-                stream.seek(start)
-                remaining = end - start + 1
-                while remaining > 0:
-                    chunk = stream.read(min(256 * 1024, remaining))
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    remaining -= len(chunk)
+        if head:
+            return
+        if compressed is not None:
+            self.wfile.write(compressed)
+            return
+        with path.open("rb") as stream:
+            stream.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = stream.read(min(256 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def do_POST(self):
         try:

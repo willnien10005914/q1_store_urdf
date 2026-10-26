@@ -105,12 +105,15 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
     const manager=new THREE.LoadingManager();
     const loader=new URDFLoader(manager);loader.parseCollision=false;
     const meshLoads=[];
+    let started=0,finished=0;
+    const showProgress=()=>{const text=`正在載入 Q1 模型 ${finished}/${Math.max(started,1)}`;document.querySelectorAll('.loading-model').forEach(label=>{label.textContent=text;});onStatus(text);};
     // FileLoader shares pending URLs across viewers without accounting for the
     // second LoadingManager. Wait for each actual mesh attachment instead.
     loader.loadMeshCb=(path,loadingManager,done)=>{
+      started++;showProgress();
       meshLoads.push(new Promise((resolve,reject)=>{
         if(!/\.stl$/i.test(path)){const error=new Error('不支援的原生 mesh：'+path);done(null,error);reject(error);return;}
-        new STLLoader(loadingManager).load(path,geometry=>{done(new THREE.Mesh(geometry));resolve();},undefined,error=>{done(null,error);reject(error);});
+        new STLLoader(loadingManager).load(path,geometry=>{done(new THREE.Mesh(geometry));finished++;showProgress();resolve();},undefined,error=>{done(null,error);reject(error);});
       }));
     };
     try{loaded=await loader.loadAsync(entry.urdf_url);
