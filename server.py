@@ -11,7 +11,7 @@ import mimetypes
 from pathlib import Path
 import re
 import threading
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from q1store.service import APIError, MAX_MOTION, MAX_UPLOAD, Store, VIDEO_EXTENSIONS
 
@@ -73,6 +73,12 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlsplit(self.path).path)
         if path == "/api/catalog":
             return self.json_response(self.store.catalog())
+        if path == "/api/specs":
+            return self.json_response(self.store.specs())
+        if path == "/api/jobs":
+            return self.json_response({"jobs": self.store.jobs_summary(), "worker": self.store.worker_status()})
+        if path == "/api/worker":
+            return self.json_response(self.store.worker_status())
         if path == "/api/robots":
             return self.json_response({"robots": self.store.all("registered_robots")})
         if path == "/api/deployments":
@@ -89,14 +95,28 @@ class Handler(BaseHTTPRequestHandler):
             return self.json_response(motion, download="q1-motion-" + motion["id"] + ".json")
         if path.startswith("/api/jobs/"):
             identifier = path.split("/")[3]
+            if path.endswith("/log"):
+                query = parse_qs(urlsplit(self.path).query)
+                lines = min(2000, max(1, int(query.get("lines", ["200"])[0]) if query.get("lines", ["200"])[0].isdigit() else 200))
+                job = self.store.job(identifier, log_lines=lines)
+                return self.json_response({"id": identifier, "state": job.get("state"), "stage_label": job.get("stage_label"),
+                                           "training": job.get("training"), "log_tail": job.get("log_tail", []), "log_url": job.get("log_url")})
             job = self.store.job(identifier)
             if path.endswith(("/manifest", "/plan")):
                 return self.json_response(job["plan"], download="q1-job-" + identifier + ".json")
             return self.json_response(job)
         if path == "/api/health":
-            return self.json_response({"ok": True, "service": "q1-motion-store", "gpu_worker": False})
+            worker = self.store.worker_status()
+            return self.json_response({"ok": True, "service": "q1-motion-store", "gpu_worker": worker["online"], "worker": worker})
         if path.startswith("/api/"):
             raise APIError("找不到 API。", 404)
+        if path.startswith("/media/jobs/"):
+            match = re.fullmatch(r"/media/jobs/([0-9a-f]{32})/([A-Za-z0-9_.-]+)", path)
+            if not match:
+                raise APIError("找不到檔案。", 404)
+            file_path, content_type = self.store.job_media(match.group(1), match.group(2))
+            return self.serve_file(file_path, head, cache="no-cache" if match.group(2).endswith((".log", ".jsonl", "progress.json")) else "public, max-age=3600",
+                                   content_type=content_type)
         if path.startswith("/media/uploads/"):
             name = path.removeprefix("/media/uploads/")
             if not re.fullmatch(r"[0-9a-f]{32}\.(mp4|webm|mov|m4v)", name):
@@ -137,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
                 GZIP_CACHE[key] = cached
         return cached
 
-    def serve_file(self, path, head=False):
+    def serve_file(self, path, head=False, cache=None, content_type=None):
         size = path.stat().st_size
         start, end, status = 0, size - 1, 200
         range_header = self.headers.get("Range")
@@ -165,14 +185,15 @@ class Handler(BaseHTTPRequestHandler):
         compressed = None if status == 206 else self.compressed_body(path)
         body_size = len(compressed) if compressed is not None else max(0, end - start + 1)
         suffix = path.suffix.lower()
-        if suffix in {".stl", ".urdf", ".jpg", ".png", ".gif", ".mp4", ".webm"}:
-            cache = "public, max-age=86400"
-        elif suffix in {".js", ".css"}:
-            cache = "public, max-age=60"
-        else:
-            cache = "no-cache"
+        if cache is None:
+            if suffix in {".stl", ".urdf", ".jpg", ".png", ".gif", ".mp4", ".webm"}:
+                cache = "public, max-age=86400"
+            elif suffix in {".js", ".css"}:
+                cache = "public, max-age=60"
+            else:
+                cache = "no-cache"
         self.send_response(status)
-        content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        content_type = content_type or mimetypes.guess_type(path)[0] or "application/octet-stream"
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(body_size))
         self.send_header("Accept-Ranges", "bytes")

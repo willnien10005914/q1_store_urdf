@@ -49,6 +49,12 @@ LANDMARKS = [
     {"id": "great-wall", "label": "萬里長城 · Beijing"},
 ]
 DEMO_DURATION = 30
+WORKER_HEARTBEAT_MAX_AGE = 90
+WORKER_STATES = ("queued_for_worker", "preparing", "waiting_for_gpu", "starting_isaac", "training", "evaluating", "recording", "complete", "failed", "cancelled")
+WORKER_ACTIVE_STATES = WORKER_STATES[:7]
+JOB_MEDIA = {"result.mp4": "video/mp4", "rollout.json": "application/json", "evaluation.json": "application/json",
+             "reference.json": "application/json", "record.json": "application/json", "native.log": "text/plain; charset=utf-8",
+             "events.jsonl": "text/plain; charset=utf-8", "latest.pt": "application/octet-stream", "progress.json": "application/json"}
 MAX_UPLOAD = 150 * 1024 * 1024
 MAX_MOTION = 12 * 1024 * 1024
 MAX_MOTION_FRAMES = 18000
@@ -158,6 +164,9 @@ class Store:
         self.youtube_lock = threading.Lock()
         self.downloader = resolve_executable(os.environ.get("Q1_YTDLP"), self.root / ".venv/bin/yt-dlp", "yt-dlp")
         self.ffmpeg = resolve_executable(os.environ.get("Q1_FFMPEG"), "ffmpeg")
+        self.jobs_dir = self.data_dir / "jobs"
+        self.jobs_dir.mkdir(exist_ok=True)
+        self.heartbeat_path = self.data_dir / "worker/heartbeat.json"
         with self.connection() as db:
             for table in ("jobs", "uploads", "motions", "listings", "purchases", "registered_robots", "deployments"):
                 db.execute(f"CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
@@ -190,23 +199,116 @@ class Store:
         with self.connection() as db:
             return [json.loads(row[0]) for row in db.execute(f"SELECT payload FROM {table} ORDER BY rowid DESC")]
 
+    def worker_status(self):
+        """Liveness of the Spark GPU worker from its heartbeat file."""
+        try:
+            beat = json.loads(self.heartbeat_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {"online": False, "state": "offline", "job_id": None, "updated_at": None, "num_envs": None}
+        age = self.clock() - float(beat.get("updated_at") or 0)
+        online = age < WORKER_HEARTBEAT_MAX_AGE and beat.get("state") != "stopped"
+        return {"online": online, "state": beat.get("state") if online else "offline", "job_id": beat.get("job_id") if online else None,
+                "updated_at": beat.get("updated_at"), "num_envs": beat.get("num_envs"), "age_s": round(age, 1)}
+
     def catalog(self):
+        worker = self.worker_status()
         return {
             "robots": read_collection(self.root / "assets/robots/manifest.json", "robots"),
             "examples": read_collection(self.root / "assets/examples/catalog.json", "examples"),
             "video_examples": read_collection(self.root / "assets/video-examples/catalog.json", "examples"),
             "video_sources": read_collection(self.root / "assets/video-examples/catalog.json", "sources"),
+            "worker": worker,
             "capabilities": {
                 "libraries": LIBRARIES, "physics": PHYSICS, "rewards": REWARDS, "landmarks": LANDMARKS,
-                "demo_duration_s": DEMO_DURATION, "worker_available": False,
+                "demo_duration_s": DEMO_DURATION, "worker_available": worker["online"],
+                "worker_robot_types": ["leg"], "worker_library": "rsl_rl", "worker_physics": "isaacsim_physx",
                 "youtube_ingest": bool(self.downloader and self.ffmpeg), "upload": True, "motion_storage": True,
                 "video_segments": True, "segment_min_s": .5, "segment_max_s": 60,
-                "payments": "demo_only", "training": "demo_or_external_worker_manifest",
+                "payments": "demo_only", "training": "demo_or_spark_gpu_worker",
                 "robot_registry": True, "deployment_download": True, "hardware_delivery": False,
-                "physics_scope": "實際後端支援須由 Q1 task adapter 驗證；選單是訓練規劃。",
+                "physics_scope": "Spark worker 以 Isaac Sim PhysX + RSL-RL PPO 執行雙足工作；其他選項保留為規劃並記錄在工作 JSON。",
                 "rewards_scope": "Q1 任務的 reward 設計預設，並非所有 Isaac Lab 任務的通用選項。",
             },
         }
+
+    def urdf_facts(self, robot):
+        """Movable joints, control axes, mass and limit ranges read from the bundled URDF."""
+        urdf_path = (self.root / str(robot.get("urdf_url", "")).lstrip("/")).resolve()
+        facts = {"available": False}
+        if not urdf_path.is_relative_to(self.root / "assets/robots") or not urdf_path.is_file():
+            return facts
+        try:
+            tree = ET.fromstring(urdf_path.read_bytes())
+        except ET.ParseError:
+            return facts
+        movable = [joint for joint in tree.findall("joint") if joint.get("type") != "fixed"]
+        efforts, velocities = set(), set()
+        for joint in movable:
+            limit = joint.find("limit")
+            if limit is not None:
+                if limit.get("effort"):
+                    efforts.add(float(limit.get("effort")))
+                if limit.get("velocity"):
+                    velocities.add(float(limit.get("velocity")))
+        mass = sum(float(link.find("inertial/mass").get("value")) for link in tree.findall("link") if link.find("inertial/mass") is not None)
+        controls = robot.get("control_joints") or []
+        groups = {}
+        for joint in movable:
+            name = joint.get("name", "").lower()
+            for group in ("waist", "hip", "knee", "ankle", "shoulder", "elbow", "wrist", "finger", "wheel"):
+                if group in name:
+                    groups.setdefault(group, {"joints": 0, "controlled": 0})
+                    groups[group]["joints"] += 1
+                    groups[group]["controlled"] += joint.get("name") in controls
+                    break
+        return {"available": True, "mass_kg": round(mass, 3), "movable_joints": len(movable), "control_joints": len(controls),
+                "continuous_joints": sum(joint.get("type") == "continuous" for joint in movable),
+                "effort_limits_nm": sorted(efforts), "velocity_limits_rad_s": sorted(velocities), "groups": groups,
+                "urdf_sha256": robot.get("urdf_sha256"), "commit": robot.get("commit")}
+
+    def specs(self):
+        """SPEC comparison: authored catalog + URDF facts + simulated energy from completed Spark jobs."""
+        path = self.root / "assets/specs/catalog.json"
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            data = {"schema": 1, "robots": {}, "motions": [], "joint_groups": {}}
+        robots = {robot["id"]: robot for robot in self.catalog()["robots"] if robot.get("id")}
+        for robot_type, entry in data.get("robots", {}).items():
+            facts = self.urdf_facts(robots.get(robot_type, {}))
+            entry["urdf"] = facts
+            if facts.get("available"):
+                entry.setdefault("specs", []).extend([
+                    {"id": "mass", "label": "模型質量", "value": facts["mass_kg"], "unit": "kg", "status": "source",
+                     "source": robots[robot_type].get("urdf_url"), "note": "URDF inertial mass 總和，是模型質量不是實機秤重。"},
+                    {"id": "control", "label": "控制關節", "value": f"{facts['control_joints']} / {facts['movable_joints']}", "unit": "軸",
+                     "status": "source", "source": "/assets/robots/manifest.json", "note": "策略 action 軸數／原生 URDF 可動關節數。"},
+                    {"id": "limits", "label": "關節限制（模擬）", "value": " · ".join(f"{v:g} N·m" for v in facts["effort_limits_nm"]) + " / " + " · ".join(f"{v:g} rad/s" for v in facts["velocity_limits_rad_s"]),
+                     "unit": "", "status": "source", "source": robots[robot_type].get("urdf_url"), "note": "URDF limit 的 effort / velocity 設定值，不是馬達實測。"},
+                ])
+        trained = []
+        for job in self.all("jobs"):
+            if job.get("mode") != "worker" or job.get("state") != "complete" or not job.get("result"):
+                continue
+            result = job["result"]
+            mechanical = result.get("mechanical") or {}
+            trained.append({"job_id": job["id"], "robot_type": job["robot_type"], "label": job.get("action_name"), "created_at": job.get("created_at"),
+                            "passed": result.get("passed"), "video_url": result.get("video_url"), "rollout_url": result.get("rollout_url"),
+                            "provenance": result.get("provenance"),
+                            "power": {"status": "simulated" if mechanical else "unmeasured", "energy_j": mechanical.get("energy_j"),
+                                      "mean_power_w": mechanical.get("mean_power_w"), "peak_power_w": mechanical.get("peak_power_w"),
+                                      "peak_torque_nm_by_group": mechanical.get("peak_torque_nm_by_group"),
+                                      "note": mechanical.get("scope") or "此工作沒有模擬機械功記錄。"}})
+        for motion in data.get("motions", []):
+            for robot_type, support in motion.get("support", {}).items():
+                facts = (data.get("robots", {}).get(robot_type) or {}).get("urdf") or {}
+                groups = facts.get("groups") or {}
+                missing = [group for group in motion.get("groups", []) if group not in groups]
+                support["joint_groups_present"] = not missing if facts.get("available") else None
+                support["missing_groups"] = missing
+        data["trained"] = trained
+        data["generated_at"] = self.clock()
+        return data
 
     def save_upload(self, filename, data):
         filename = Path(filename.replace("\\", "/")).name
@@ -608,11 +710,18 @@ class Store:
                "target_person": target, "config": config, "action_name": action_name, "created_at": now,
                "state": "queued_for_worker" if mode == "worker" else "retargeting", "progress": 0,
                "result": None, "is_demo": mode == "demo", "newly_trained": False,
-               "label": "概念流程示範；不執行 PPO" if mode == "demo" else "等待外部 Isaac Lab 3 worker",
+               "label": "概念流程示範；不執行 PPO" if mode == "demo" else "等待 Spark GPU worker",
                "plan": self.worker_plan(robot, config, source, target)}
         job["plan"]["job_id"] = job["id"]
         job["plan"]["action_name"] = action_name
         job["plan"]["motion_extraction_ready"] = bool(motion and not motion.get("demo", False))
+        if mode == "worker":
+            trainable = robot == "leg" and bool(motion)
+            job["stage_label"] = "等待 Spark GPU worker"
+            job["training"] = {"budget_s": hours * 3600., "trainable": trainable,
+                               "blocker": None if trainable else ("雙輪 Isaac Lab 任務尚未接入" if robot != "leg" else "缺少 MediaPipe 關節參考")}
+            job["plan"]["executor"] = "q1_store_worker" if trainable else None
+            job["plan"]["trainable"] = trainable
         if segment:
             job["segment"] = segment
             job["plan"]["segment"] = dict(segment)
@@ -647,11 +756,13 @@ class Store:
                              "準備授權地標 USD 場景與 RTX camera", "錄製實際 checkpoint 的 rollout 並附評估證據"],
                 "note": "這是規劃清單，不會自動執行指令。Q1 task adapter 和地標 USD 尚待接入；時數為預算，非成功保證。"}
 
-    def job(self, identifier):
+    def job(self, identifier, log_lines=40):
         job = self.get("jobs", identifier)
         elapsed = max(0, self.clock() - job["created_at"])
         job["elapsed_s"] = round(elapsed, 2)
-        if job.get("state") == "cancelled" or job["mode"] == "worker":
+        if job["mode"] == "worker":
+            return self.decorate_worker_job(job, log_lines)
+        if job.get("state") == "cancelled":
             return job
         fraction = min(1, elapsed / DEMO_DURATION)
         job["progress"] = round(fraction * 100)
@@ -667,18 +778,73 @@ class Store:
                                  "label": "既有 PPO 模擬成果；不是本次影片新訓練或地標 RTX 渲染"}
         return job
 
+    def decorate_worker_job(self, job, log_lines=40):
+        """Attach live worker evidence (log tail, ETA, liveness) without mutating the stored row."""
+        worker = self.worker_status()
+        directory = self.jobs_dir / job["id"]
+        training = dict(job.get("training") or {})
+        state = job.get("state")
+        job["stage_label"] = job.get("stage_label") or {"queued_for_worker": "等待 Spark GPU worker"}.get(state, state)
+        job["worker"] = worker
+        if state in WORKER_ACTIVE_STATES and state != "queued_for_worker" and not worker["online"]:
+            job["stage_label"] = "worker 離線 · 重新啟動 worker 後會接續"
+            training["stalled"] = True
+        if state == "queued_for_worker":
+            ahead = [other for other in self.all("jobs") if other.get("mode") == "worker" and other["id"] != job["id"]
+                     and other.get("state") in WORKER_ACTIVE_STATES and other["created_at"] < job["created_at"]]
+            training["queue_position"] = len(ahead) + 1
+            if not training.get("trainable", True):
+                job["stage_label"] = "無法訓練：" + str(training.get("blocker"))
+        if training.get("eta_at") and state in WORKER_ACTIVE_STATES:
+            training["eta_s"] = max(0., round(float(training["eta_at"]) - self.clock(), 1))
+        job["training"] = training
+        if log_lines and directory.is_dir():
+            from .worker import tail_lines
+            job["log_tail"] = tail_lines(directory / "native.log", log_lines)
+            job["log_url"] = f"/media/jobs/{job['id']}/native.log"
+        else:
+            job["log_tail"] = []
+        return job
+
+    def jobs_summary(self, limit=50):
+        keys = ("id", "robot_type", "mode", "state", "progress", "action_name", "created_at", "finished_at", "stage_label", "label", "is_demo", "newly_trained")
+        items = []
+        for job in self.all("jobs")[:limit]:
+            current = self.job(job["id"], log_lines=0)
+            summary = {key: current.get(key) for key in keys}
+            summary["training"] = {key: (current.get("training") or {}).get(key) for key in ("eta_s", "budget_s", "num_envs", "queue_position", "trainable", "blocker")}
+            result = current.get("result") or {}
+            summary["result"] = {key: result.get(key) for key in ("video_url", "rollout_url", "passed", "newly_trained", "label")} if result else None
+            items.append(summary)
+        return items
+
+    def job_media(self, identifier, name):
+        if name not in JOB_MEDIA:
+            raise APIError("找不到檔案。", 404)
+        self.get("jobs", identifier)
+        path = (self.jobs_dir / identifier / name).resolve()
+        if not path.is_relative_to(self.jobs_dir) or not path.is_file():
+            raise APIError("此工作尚未產生這個檔案。", 404)
+        return path, JOB_MEDIA[name]
+
     def cancel(self, identifier):
         job = self.job(identifier)
-        if job["state"] == "demo_complete":
-            raise APIError("示範已完成，無需取消。", 409)
+        if job["state"] in ("demo_complete", "complete"):
+            raise APIError("工作已完成，無需取消。", 409)
+        if job["state"] in ("failed", "cancelled"):
+            raise APIError("工作已結束。", 409)
         job["state"] = "cancelled"
+        job["stage_label"] = "工作已取消"
         job["cancelled_at"] = self.clock()
+        for key in ("log_tail", "log_url", "worker", "elapsed_s"):
+            job.pop(key, None)
         return self.put("jobs", job)
 
     def create_listing(self, payload):
         job = self.job(payload.get("job_id", ""))
-        if job["state"] != "demo_complete" or not job.get("result"):
-            raise APIError("請完成示範流程後再分享。", 409)
+        if job["state"] not in ("demo_complete", "complete") or not job.get("result"):
+            raise APIError("請完成示範流程或真實訓練後再分享。", 409)
+        real = job["state"] == "complete" and bool(job["result"].get("newly_trained"))
         title = str(payload.get("title", "")).strip()
         if not 1 <= len(title) <= 100:
             raise APIError("請輸入 1 至 100 字的動作名稱。")
@@ -690,10 +856,11 @@ class Store:
             raise APIError("示範價格必須介於 0 與 9999。")
         listing = {"id": uuid.uuid4().hex, "job_id": job["id"], "robot_type": job["robot_type"],
                    "title": title, "description": str(payload.get("description", ""))[:1000], "price": round(price, 2),
-                   "currency": "USD", "is_demo": True, "newly_trained": False, "video_url": job["result"]["video_url"],
+                   "currency": "USD", "is_demo": not real, "newly_trained": real, "video_url": job["result"].get("video_url"),
+                   "rollout_url": job["result"].get("rollout_url"), "passed": job["result"].get("passed"),
                    "created_at": self.clock(), "provenance": job["result"]["provenance"],
                    "compatible_with_current_urdf": job["result"].get("compatible_with_current_urdf"),
-                   "label": "示範上架 · 既有模擬影片 · 不收取費用"}
+                   "label": "Spark 新訓練 PPO 成果 · 模擬交易不收費" if real else "示範上架 · 既有模擬影片 · 不收取費用"}
         return self.put("listings", listing)
 
     def robot_contract(self, robot_type):
@@ -746,8 +913,8 @@ class Store:
         """Prepare an inert package addressed to a registered robot; never contact hardware."""
         if not isinstance(payload, dict):
             raise APIError("Deploy 內容必須是 JSON object。")
-        job = self.job(payload.get("job_id", ""))
-        if job.get("state") != "demo_complete" or not job.get("result"):
+        job = self.job(payload.get("job_id", ""), log_lines=0)
+        if job.get("state") not in ("demo_complete", "complete") or not job.get("result"):
             raise APIError("請先完成動作流程，再下載 Deploy 套件。", 409)
         target = self.get("registered_robots", payload.get("robot_id", ""))
         if target["robot_type"] != job["robot_type"]:

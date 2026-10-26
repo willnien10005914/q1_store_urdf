@@ -73,7 +73,8 @@ MediaPipe Pose 是人體姿態模型；H2-X 實測曾偵測到背景人物，候
 | RL／physics／rewards／時數 | 可選擇並保存工作規劃；Q1 的 Isaac Lab 3 task adapter 尚未接入。 |
 | 地標舞台 | 可選台北 101、艾菲爾鐵塔、時代廣場、澀谷、萬里長城。3D 畫面是概念輪廓；尚無地標 USD／RTX 實錄。 |
 | 30 秒 demo 流程 | 可操作。展示 retargeting → 訓練示意 → rendering 示意，完成後播放已標示來源的歷史 PPO 影片。 |
-| 真實訓練模式 | 匯出工作 JSON，狀態維持等待外部 worker；不會自動開始訓練或變成成功。 |
+| 真實訓練模式 | 建立 `queued_for_worker` 工作。若主機同時執行 `scripts/worker.sh`（需 Isaac Sim／Isaac Lab 與 `~/will/q1_leg_urdf`），雙足工作會真的以 RSL-RL PPO 訓練，進度、ETA、Isaac Lab log、評估與新錄影保存在 `.data/jobs/<id>/`，重啟網站後仍可查看。雙輪 task 尚未接入，會明確標示失敗原因。 |
+| SPEC 比較 | 首頁 Motion Studio 之前列出雙足／雙輪的機構、控制與動作支援矩陣，資料來源標示為 source／command／measured／simulated／unmeasured；電池續航未量測時不給數字。 |
 | 註冊 Q1／Deploy | 完成 demo 後可註冊名稱、機型與序號，選擇相符的 Q1，下載目標機器人的部署預覽套件。現階段不含新 policy 權重，不會傳送控制命令或宣稱機器人已接收。 |
 | 分享／價格／收藏／購買 | 可操作的模擬市集。保存分享記錄與零收款收據；沒有真實付款或交付新權重。 |
 
@@ -113,6 +114,21 @@ Q1_YTDLP="$PWD/.venv/bin/yt-dlp" Q1_STORE_PYTHON=.venv/bin/python bash scripts/s
 依來源格式可能需要主機安裝 `ffmpeg`；YouTube extractor 也可能要求可用的 JS runtime。
 下載限制、登入／地區與網站變更仍可能造成失敗，此時可上傳有權使用的影片。
 YouTube 嵌入播放器只能預覽；要執行 MediaPipe，必須取得可讀影格的實際影片檔。
+
+### 選裝 Spark GPU 訓練 worker
+
+```bash
+# 另一個終端（或 tmux）；預設 Q1_LEG_ROOT=$HOME/will/q1_leg_urdf
+Q1_WORKER_NUM_ENVS=2048 bash scripts/worker.sh --data-dir .data
+```
+
+worker 透過 `q1_leg_urdf/scripts/isaac_env.sh` 找到 Isaac Sim Python，依序處理
+`queued_for_worker` 的雙足工作：以 `q1store/reference.py` 把 MediaPipe 關節參考轉成
+leg Motion contract，執行 `scripts/train_store_job.py` 的 train（分段 `runner.learn`，
+每段寫 `progress.json`／`latest.pt`，可 `--resume`）與 record（評估、rollout、`result.mp4`）。
+網站每 3 秒讀取 `/api/jobs/<id>`：ETA、iteration、steps/s、Isaac Lab log 尾端與 worker 心跳。
+worker 離線時工作標示為「worker 離線」，重新啟動 worker 會從最後 checkpoint 接續。
+`Q1_WORKER_MAX_BUDGET_S` 可限制每個工作的實際訓練秒數（測試用）。
 
 ## 影片分段訓練操作
 

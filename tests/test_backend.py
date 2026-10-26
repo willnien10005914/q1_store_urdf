@@ -372,6 +372,96 @@ ffmpeg -y -f lavfi -i testsrc=size=64x64:rate=10:duration=6 -c:v libx264 -pix_fm
                 self.store.create_motion(motion)
 
 
+    def test_reference_builder_resamples_subset_joints_and_blends_from_default_stance(self):
+        from q1store.reference import ReferenceError, build_reference
+        motion = {"id": "m1", "robot_type": "leg", "joint_names": ["hip", "extra"],
+                  "frames": [{"time": 0, "q": [0.9, 0.3]}, {"time": .5, "q": [-0.2, 0.1]}, {"time": 1.0, "q": [0.4, 0.0]}]}
+        reference = build_reference(motion, joint_names=["hip", "knee"], default=[0.1, 0.3], lower=[-1, -1], upper=[.5, 1],
+                                    urdf_sha256="deadbeef", grounded_height=lambda q: .8 + .05 * q[0], job_id="job1")
+        self.assertEqual(reference["joint_names"], ["hip", "knee"])
+        self.assertEqual(reference["source"], "mediapipe")
+        self.assertEqual(reference["clip"]["missing_joints_default"], ["knee"])
+        self.assertEqual(len(reference["time"]), len(reference["q"]))
+        self.assertEqual(len(reference["root"]), len(reference["q"]))
+        self.assertTrue(all(b > a for a, b in zip(reference["time"], reference["time"][1:])))
+        self.assertEqual(reference["q"][0], [0.1, 0.3])  # starts from the default stance
+        self.assertAlmostEqual(reference["q"][-1][0], 0.1, places=9)  # returns to the default stance
+        self.assertTrue(all(-1 <= q[0] <= .5 for q in reference["q"]))  # clamped to limits
+        self.assertTrue(all(q[1] == 0.3 for q in reference["q"]))
+        self.assertAlmostEqual(reference["duration_s"], 1.0 + 1.0 + .5, places=6)
+        self.assertEqual(reference["root"][0][2], .8 + .05 * .1)
+        with self.assertRaises(ReferenceError):
+            build_reference({"joint_names": ["hip"], "frames": [{"time": 0, "q": [0]}, {"time": .2, "q": [0]}]}, joint_names=["hip"],
+                            default=[0], lower=[-1], upper=[1], urdf_sha256="x", grounded_height=lambda q: .8)
+
+    def test_worker_updates_are_visible_through_job_api_and_survive_store_restart(self):
+        from q1store.worker import Worker, parse_metrics
+        exported = self.motion()
+        motion_id = self.store.create_motion(exported)["id"]
+        job = self.store.create_job(self.payload(mode="worker", motion_id=motion_id))
+        self.assertTrue(job["training"]["trainable"])
+        self.assertEqual(job["stage_label"], "等待 Spark GPU worker")
+        self.assertEqual(job["training"]["queue_position"], 1)
+        worker = Worker(self.root, leg_root=self.root, num_envs=64, clock=lambda: self.now)
+        self.assertEqual([j["id"] for j in worker.pending()], [job["id"]])
+        worker.heartbeat("training", job["id"])
+        directory = worker.job_dir(job["id"])
+        (directory / "native.log").write_text("\x1b[1m Learning iteration 12/20 \x1b[0m\nSteps per second: 4790\nMean reward: 84.07\nMean episode length: 62.77\n")
+        worker.update(job["id"], state="training", progress=42, training={"eta_s": 600, "eta_at": self.now + 600, "worker_pid": 999999, "num_envs": 64})
+        live = Store(self.root, clock=lambda: self.now).job(job["id"])
+        self.assertEqual((live["state"], live["progress"], live["stage_label"]), ("training", 42, "Isaac Lab PPO 訓練中"))
+        self.assertTrue(live["worker"]["online"])
+        self.assertIn("Mean reward: 84.07", live["log_tail"])
+        self.assertEqual(live["log_url"], "/media/jobs/" + job["id"] + "/native.log")
+        self.assertEqual(parse_metrics(live["log_tail"]), {"mean_reward": 84.07, "mean_episode_length": 62.77, "steps_per_second": 4790.0, "learning_iteration": 12})
+        self.now += 100
+        later = self.store.job(job["id"])
+        self.assertEqual(later["training"]["eta_s"], 500)
+        self.assertFalse(later["worker"]["online"])  # heartbeat went stale
+        self.assertIn("worker 離線", later["stage_label"])
+        self.assertEqual(self.store.jobs_summary()[0]["state"], "training")
+        self.store.cancel(job["id"])
+        self.assertEqual(worker.update(job["id"], state="complete", progress=100)["state"], "cancelled")
+        self.assertEqual(self.store.job(job["id"])["state"], "cancelled")
+        with self.assertRaises(APIError):
+            self.store.job_media(job["id"], "result.mp4")
+        with self.assertRaises(APIError):
+            self.store.job_media(job["id"], "../store.sqlite3")
+        path, content_type = self.store.job_media(job["id"], "native.log")
+        self.assertEqual((path, content_type), (directory / "native.log", "text/plain; charset=utf-8"))
+
+    def test_worker_fails_jobs_it_cannot_train_and_specs_report_completed_training(self):
+        from q1store.worker import Worker
+        worker = Worker(self.root, leg_root=self.root, num_envs=64, clock=lambda: self.now)
+        planned = self.store.create_job(self.payload(mode="worker"))
+        self.assertFalse(planned["training"]["trainable"])
+        self.assertTrue(worker.run_once())
+        failed = self.store.job(planned["id"])
+        self.assertEqual(failed["state"], "failed")
+        self.assertIn("關節參考", failed["error"])
+        self.assertFalse(worker.run_once())
+        (self.root / "assets/specs").mkdir()
+        (self.root / "assets/specs/catalog.json").write_text(json.dumps({"schema": 1, "robots": {"leg": {"name": "Q1 Leg", "specs": []}},
+            "motions": [{"id": "stand", "groups": ["hip", "wheel"], "support": {"leg": {"status": "store_trainable"}}}], "joint_groups": {}}))
+        specs = self.store.specs()
+        self.assertEqual(specs["robots"]["leg"]["urdf"]["control_joints"], 1)
+        self.assertEqual([s["id"] for s in specs["robots"]["leg"]["specs"]], ["mass", "control", "limits"])
+        self.assertEqual(specs["motions"][0]["support"]["leg"]["missing_groups"], ["wheel"])
+        self.assertEqual(specs["trained"], [])
+        motion_id = self.store.create_motion(self.motion())["id"]
+        job = self.store.create_job(self.payload(mode="worker", motion_id=motion_id, action_name="起跳"))
+        worker.update(job["id"], state="complete", progress=100, result={"newly_trained": True, "passed": False, "video_url": None,
+                      "rollout_url": "/media/jobs/" + job["id"] + "/rollout.json", "provenance": "Spark PPO",
+                      "mechanical": {"status": "simulated", "energy_j": 12.5, "mean_power_w": 2.1, "peak_power_w": 9.0, "scope": "sim"}})
+        trained = self.store.specs()["trained"]
+        self.assertEqual((trained[0]["label"], trained[0]["power"]["status"], trained[0]["power"]["energy_j"]), ("起跳", "simulated", 12.5))
+        listing = self.store.create_listing({"job_id": job["id"], "title": "起跳 PPO", "price": 0})
+        self.assertTrue(listing["newly_trained"])
+        self.assertFalse(listing["is_demo"])
+        with self.assertRaises(APIError):
+            self.store.cancel(job["id"])
+
+
 class HTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -420,6 +510,30 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("HEAD", "/assets/test.mp4")[2], b"")
         self.assertEqual(self.request("HEAD", "/api/health")[2], b"")
         self.assertEqual(self.request("HEAD", "/.data/store.sqlite3")[0], 404)
+
+    def test_job_list_specs_log_and_media_routes(self):
+        status, _, body = self.request("GET", "/api/specs")
+        self.assertEqual(status, 200)
+        self.assertIn("trained", json.loads(body))
+        status, _, body = self.request("GET", "/api/jobs")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["worker"]["online"], False)
+        self.assertIsInstance(payload["jobs"], list)
+        job = json.loads(self.request("POST", "/api/jobs", json.dumps({"robot_type": "leg", "mode": "worker", "source": {"type": "example", "id": "leg-example"},
+                                                                       "config": {"rewards": ["balance"]}}).encode(), {"Content-Type": "application/json"})[2])
+        self.assertEqual(job["state"], "queued_for_worker")
+        status, _, body = self.request("GET", "/api/jobs/" + job["id"] + "/log?lines=5")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["log_tail"], [])
+        self.assertEqual(self.request("GET", "/media/jobs/" + job["id"] + "/result.mp4")[0], 404)
+        self.assertEqual(self.request("GET", "/media/jobs/" + job["id"] + "/../store.sqlite3")[0], 404)
+        directory = self.server.store.jobs_dir / job["id"]
+        directory.mkdir()
+        (directory / "rollout.json").write_text('{"frames": []}')
+        status, headers, body = self.request("GET", "/media/jobs/" + job["id"] + "/rollout.json")
+        self.assertEqual((status, headers["Content-Type"], body), (200, "application/json", b'{"frames": []}'))
+        self.assertEqual(json.loads(self.request("GET", "/api/health")[2])["gpu_worker"], False)
 
     def test_internal_files_are_inaccessible(self):
         for path in ["/.data/store.sqlite3", "/server.py", "/assets/../server.py", "/assets/%2e%2e/server.py", "/.git/config"]:
