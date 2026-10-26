@@ -64,10 +64,10 @@
       <div class="ac-gf-column">
         <h3 data-i18n="footer_legal_dir">法律與授權</h3>
         <ul>
-          <li><a href="#legal-license" data-i18n="footer_license">Software License</a></li>
-          <li><a href="#legal-privacy" data-i18n="footer_privacy">Privacy Policy</a></li>
-          <li><a href="#legal-terms" data-i18n="footer_terms">Terms of Use</a></li>
-          <li><a href="#legal" data-i18n="footer_legal">Legal</a></li>
+          <li><a href="#legal-license" data-legal="license" data-i18n="footer_license">Software License</a></li>
+          <li><a href="#legal-privacy" data-legal="privacy" data-i18n="footer_privacy">Privacy Policy</a></li>
+          <li><a href="#legal-terms" data-legal="terms" data-i18n="footer_terms">Terms of Use</a></li>
+          <li><a href="#legal" data-legal="legal" data-i18n="footer_legal">Legal</a></li>
         </ul>
       </div>
       <div class="ac-gf-column ac-gf-brand">
@@ -83,16 +83,15 @@
     <div class="ac-gf-legal" id="legal">
       <div class="ac-gf-legal-copyright" id="footer-copyright">Copyright © 2026 Quanta Computer Inc. All rights reserved.</div>
       <div class="ac-gf-legal-links">
-        <a href="#legal-privacy" id="legal-privacy" data-i18n="footer_privacy">Privacy Policy</a>
-        <a href="#legal-terms" id="legal-terms" data-i18n="footer_terms">Terms of Use</a>
-        <a href="#legal-license" id="legal-license" data-i18n="footer_license">Software License</a>
-        <a href="#legal" data-i18n="footer_legal">Legal</a>
+        <a href="#legal-privacy" id="legal-privacy" data-legal="privacy" data-i18n="footer_privacy">Privacy Policy</a>
+        <a href="#legal-terms" id="legal-terms" data-legal="terms" data-i18n="footer_terms">Terms of Use</a>
+        <a href="#legal-license" id="legal-license" data-legal="license" data-i18n="footer_license">Software License</a>
+        <a href="#legal" data-legal="legal" data-i18n="footer_legal">Legal</a>
       </div>
     </div>
-    <p class="ac-gf-disclaimer" data-i18n="footer_disclaimer">Q1 Store 概念展示 · MediaPipe 幾何映射不等同物理驗證。Demo 成果使用已標示來源的歷史 PPO 影片。Spark 真實訓練結果會標示 envs、updates 與驗收狀態；地標 RTX 錄影與付款服務仍需場景資產與支付系統。</p>
-    <p class="ac-gf-disclaimer muted" data-i18n="footer_more">Q1 Store 由廣達電腦股份有限公司（Quanta Computer Inc.）相關專案概念展示。頁面上的商標與名稱分屬其權利人所有。</p>
   </div>
 </footer>
+<dialog id="legal-dialog" class="legal-dialog"><button id="close-legal" class="dialog-close" data-i18n-aria="legal_close" aria-label="關閉說明">×</button><p class="eyebrow">QUANTA COMPUTER</p><h2 id="legal-title"></h2><div id="legal-body" class="legal-copy"></div></dialog>
 <dialog id="ces-dialog" class="media-dialog"><button id="close-ces" class="dialog-close" data-i18n-aria="ces_close" aria-label="關閉 CES 影片">×</button><p class="eyebrow" data-i18n="ces_eyebrow">CES 2027 / QUANTA Q1 HIGHLIGHT</p><h2 data-i18n="ces_title">Q1 在 CES 2027。</h2><video id="ces-video" src="/assets/ces/ces2027-highlight.mp4" muted autoplay loop playsinline controls preload="metadata"></video><p class="ces-note" data-i18n="ces_note">靜音播放的精華片段；影片保存在這台 Spark 與 GitHub repository。</p></dialog>
 <dialog id="sdk-dialog" class="sdk-dialog"><button id="close-sdk" class="dialog-close" data-i18n-aria="sdk_close" aria-label="關閉 SDK">×</button><div class="sdk-ribbon" role="list"><button type="button" class="sdk-slice" data-sdk-slice><span class="sdk-photo"><img src="/assets/sdk/logistics.jpg" alt=""><span data-i18n="sdk_uc_logistics">物流送貨</span></span></button><button type="button" class="sdk-slice" data-sdk-slice><span class="sdk-photo"><img src="/assets/sdk/home.jpg" alt=""><span data-i18n="sdk_uc_home">家用打掃</span></span><i class="sdk-seam" aria-hidden="true"></i></button><button type="button" class="sdk-slice" data-sdk-slice><span class="sdk-photo"><img src="/assets/sdk/factory.jpg" alt=""><span data-i18n="sdk_uc_factory">工廠巡檢</span></span><i class="sdk-seam" aria-hidden="true"></i></button></div><div class="sdk-body"><p class="eyebrow" data-i18n="sdk_eyebrow">Q1 SDK / VLA</p><h2 data-i18n="sdk_title">一次示範，就學會。</h2><p class="sdk-lead" data-i18n="sdk_lead">用 SDK 訓練 VLA。看一次，或帶一次，技能就留下。</p><div class="sdk-teach"><div><strong data-i18n="sdk_oneshot_title">One-shot learning</strong><p data-i18n="sdk_oneshot_body">一支示範影片就學會新任務，對到現場畫面直接做。</p></div><div><strong data-i18n="sdk_mentor_title">Mentor teaching</strong><p data-i18n="sdk_mentor_body">導師牽引或遙操作帶做一次，機器人跟著學會並留下技能。</p></div><div><strong data-i18n="sdk_soc_title">可換大腦 SoC</strong><p data-i18n="sdk_soc_body">技能留下之後，大腦可依效能或成本彈性更換。</p></div></div><a id="sdk-contact" class="button primary" href="#" data-i18n="sdk_contact_button">聯絡 Sales 取得 SDK ↗</a><p id="sdk-sales-note" class="sdk-sales-note"></p></div></dialog>
 <dialog id="video-dialog"><button id="close-video" class="dialog-close" data-i18n-aria="video_close" aria-label="關閉影片">×</button><p class="eyebrow">Q1 MOTION / ORIGINAL RECORDING</p><h2 id="video-title"></h2><video id="example-video" controls playsinline></video><p id="video-provenance"></p><a id="video-source-link" target="_blank" rel="noopener">GitHub ↗</a></dialog>

@@ -97,8 +97,11 @@
 .ac-gf-legal-links a:first-child{padding-left:0}
 .ac-gf-legal-links a:last-child{border-right:0;padding-right:0}
 .ac-gf-legal-links a:hover{text-decoration:underline;color:#06c}
-.ac-gf-disclaimer{margin:10px 0 0;font-size:12px;line-height:1.5;color:#6e6e73;max-width:980px}
-.ac-gf-disclaimer.muted{color:#86868b;margin-top:6px}
+.legal-dialog{max-width:640px;width:min(92vw,640px)}
+.legal-dialog h2{font-size:22px;margin:0 0 14px}
+.legal-copy{font-size:13px;line-height:1.7;color:#3a3a40;max-height:min(58vh,420px);overflow:auto}
+.legal-copy p{margin:0 0 12px}
+.legal-copy p:last-child{margin-bottom:0}
 @media(max-width:900px){.ac-gf-directory{grid-template-columns:1fr 1fr}.ac-gf-brand{grid-column:1/-1}}
 @media(max-width:700px){.nav-tools{gap:10px}.lang-switch button{min-width:38px;padding:4px 8px;font-size:10px}.nav-github{display:none}.ac-gf-directory{grid-template-columns:1fr;gap:18px;padding:28px 0 20px}.ac-gf-legal{flex-direction:column;align-items:flex-start}.ac-gf-legal-links a{padding:4px 10px 4px 0;border-right:0}.ac-gf-content{padding:0 16px 22px}}
 
