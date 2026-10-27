@@ -101,11 +101,12 @@ bash scripts/start_store.sh --port 8876
 區網以外要用暫時公開網址時（免費約 60 分鐘）：
 
 ```bash
-bash scripts/pinggy.sh          # 轉發本機 8878
+bash scripts/pinggy.sh          # 轉發本機 8878（公開端強制 HTTPS）
 bash scripts/pinggy.sh 8876     # 或其他本機埠
 ```
 
-成功後終端會印出 `https://….free.pinggy.net`；第一次進站可能要按 Enter site。
+成功後終端會印出 `https://….free.pinggy.net`（HTTP 會導向 HTTPS）；第一次進站可能要按 Enter site。
+請用 **https://** 連結。若公司 Skyhigh 等 SWG 仍封鎖 `*.pinggy.net`，那是網域分類封鎖，不是缺 HTTPS；需 IT 放行，或改用 Pro／自有網域隧道。
 
 上傳影片、動作參考與工作／市集記錄保存在忽略追蹤的 `.data/`，
 可用 `--data-dir /your/path` 或 `Q1_STORE_DATA` 指定其他位置。
