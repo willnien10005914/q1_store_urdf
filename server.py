@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run locally: python3 server.py --port 8876. No GPU jobs or payments run here."""
+"""Run locally: python3 server.py --port 8876. Binds all interfaces for LAN access."""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +10,7 @@ import json
 import mimetypes
 from pathlib import Path
 import re
+import socket
 import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -271,9 +272,23 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
+def lan_urls(port):
+    """Advertised URLs for same-subnet browsers when bound to 0.0.0.0."""
+    urls = [f"http://127.0.0.1:{port}/"]
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+        if ip and not ip.startswith("127."):
+            urls.append(f"http://{ip}:{port}/")
+    except OSError:
+        pass
+    return urls
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0 for LAN)")
     parser.add_argument("--port", default=8876, type=int)
     parser.add_argument("--data-dir")
     args = parser.parse_args()
@@ -281,6 +296,9 @@ def main():
     with ThreadingHTTPServer((args.host, args.port), Handler) as server:
         server.store = store
         print(f"Q1 Motion Store: http://{args.host}:{args.port}/", flush=True)
+        if args.host in {"0.0.0.0", "::"}:
+            for url in lan_urls(args.port):
+                print(f"  open {url}", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
