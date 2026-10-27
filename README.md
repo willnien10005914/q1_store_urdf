@@ -97,6 +97,16 @@ bash scripts/start_store.sh --port 8876
 開啟 **http://127.0.0.1:8876/**；同網段也可開 `http://<這台 Spark 的區網 IP>:8876/`。
 服務預設綁 `0.0.0.0`（區網可連）；若只要本機可改 `--host 127.0.0.1`。
 啟動腳本只執行網站服務，不啟動 GPU 訓練。
+
+區網以外要用暫時公開網址時（免費約 60 分鐘）：
+
+```bash
+bash scripts/pinggy.sh          # 轉發本機 8878
+bash scripts/pinggy.sh 8876     # 或其他本機埠
+```
+
+成功後終端會印出 `https://….free.pinggy.net`；第一次進站可能要按 Enter site。
+
 上傳影片、動作參考與工作／市集記錄保存在忽略追蹤的 `.data/`，
 可用 `--data-dir /your/path` 或 `Q1_STORE_DATA` 指定其他位置。
 
