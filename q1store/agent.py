@@ -22,6 +22,36 @@ from .service import APIError
 MAX_TOOL_ROUNDS = 6
 # Hold back enough chars for the longest escaped close tag: &amp;lt;/think&amp;gt; (23).
 HOLDBACK = 32
+
+
+def reply_locale(context=None):
+    """Store UI locale for Hermes replies: ``en`` or ``zh-Hant``."""
+    raw = str((context or {}).get("locale") or (context or {}).get("lang") or "zh-Hant").strip().lower()
+    if raw.startswith("en"):
+        return "en"
+    return "zh-Hant"
+
+
+def is_en(context=None):
+    return reply_locale(context) == "en"
+
+
+def loc_text(context, zh, en):
+    return en if is_en(context) else zh
+
+
+def lesson_markdown_for_locale(lesson, context=None):
+    if is_en(context):
+        return (lesson.get("markdown_en") or lesson.get("markdown") or "")
+    return (lesson.get("markdown") or lesson.get("markdown_en") or "")
+
+
+def lesson_title_for_locale(lesson, context=None):
+    if is_en(context):
+        return lesson.get("title_en") or lesson.get("title") or lesson.get("id")
+    return lesson.get("title") or lesson.get("title_en") or lesson.get("id")
+
+
 TOOLS = [
     {"name": "web_search", "description": "Search the web (DuckDuckGo). Use for Isaac Lab / Isaac Sim docs, GitHub issues and release notes.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -270,11 +300,28 @@ class Agent:
                 f"result_json={result_text or '(none — call analyze_run)'}\n"
                 f"log_tail:\n{(last_run.get('log_tail') or '')[:3500]}\n"
             )
+        locale = reply_locale(context)
+        if locale == "en":
+            language_rule = (
+                "CRITICAL LANGUAGE RULE: The Q1 Store UI locale is English. "
+                "Write every visible reply (answer, explanations, status wording, and tool narrations you invent) in clear English. "
+                "Keep API names, code, file paths, and proper nouns in their original English form. "
+                "Do not reply in Chinese unless the learner explicitly asks you to switch."
+            )
+        else:
+            language_rule = (
+                "CRITICAL LANGUAGE RULE: The Q1 Store UI locale is Traditional Chinese（繁體中文）. "
+                "Write every visible reply（回答、說明、狀態敘述）in Traditional Chinese. "
+                "Keep API names, code, file paths, and English proper nouns as-is. "
+                "Do not reply in English prose unless the learner explicitly asks you to switch."
+            )
+        lesson_title = lesson_title_for_locale(lesson, context)
+        lesson_md = lesson_markdown_for_locale(lesson, context)
         return (
             "You are Hermes, the Q1 Store tutor for Isaac Lab 3.0 and Isaac Sim. You teach by explaining the APIs in the current lesson, "
             "pointing at exact lines of example.py, proposing concrete edits and parameter changes, diagnosing failed runs, analyzing completed "
             "run results (metrics, evaluation, result.mp4 / rollout.json), and repairing the local Isaac Lab / CUDA environment when needed. "
-            "Answer in the learner's language (Traditional Chinese by default; English if they write English). Be precise about 3.0 facts: "
+            f"{language_rule} Be precise about 3.0 facts: "
             "ProxyArray (.torch/.warp), XYZW quaternions, write_*_to_sim_index/_mask, robot.actuators.target_command.set_*_index, "
             "actuator_effort_limit vs joint_effort_limit, launch_simulation, physics=newton_mjwarp|isaacsim_physx|ovphysx, HEADLESS=1 (no --headless), "
             "ViserVisualizerCfg/RerunVisualizerCfg on sim.visualizer_cfgs (NOT VisualizerCfg(kind=…)), "
@@ -308,12 +355,13 @@ class Agent:
             "propose_code for optional review diffs, set_params for slider changes, start_run to execute, analyze_run for post-run results, "
             "propose_course when you discover new Isaac Lab 3 material worth a lesson.\n"
             f"<tools>{json.dumps(TOOLS, ensure_ascii=False)}</tools>\n\n"
+            f"Store UI locale: {locale}\n"
             f"Learner: {progress.get('name')} · level {progress['level']['id']} · {progress['completed']}/{progress['total']} lessons done.\n"
             f"Memory about the learner: {json.dumps(memory, ensure_ascii=False) if memory else 'none yet'}\n"
-            f"Lesson: {lesson['id']} — {lesson.get('title')} (category {lesson.get('category')}, robot {context.get('robot', 'leg')}).\n"
+            f"Lesson: {lesson['id']} — {lesson_title} (category {lesson.get('category')}, robot {context.get('robot', 'leg')}).\n"
             f"Lesson APIs: {', '.join(lesson.get('apis', []))}\nCurrent params: {json.dumps(params, ensure_ascii=False)}\n"
             f"{last_run_blob}"
-            f"Lesson text (markdown):\n{lesson.get('markdown', '')[:5000]}\n"
+            f"Lesson text (markdown):\n{lesson_md[:5000]}\n"
         )
 
     def messages(self, uid, lesson, context, user_message):
@@ -377,11 +425,18 @@ class Agent:
             or bool(EXAMPLE_API_HINT.search(last_err_blob))
         )
         if force_tools:
-            note = (
-                "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。"
-                if wants_analyze or cmd in ("/analyze", "/result")
-                else "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI／example.py API）。"
-            )
+            if wants_analyze or cmd in ("/analyze", "/result"):
+                note = loc_text(
+                    context,
+                    "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。",
+                    "Tool mode: analyzing the latest run (result / evaluation / video / rollout).",
+                )
+            else:
+                note = loc_text(
+                    context,
+                    "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI／example.py API）。",
+                    "Tool mode: handling repair/commands (read logs, diagnose runtime, and repair CUDA / importers / PhysxJointAPI / example.py APIs when needed).",
+                )
             yield from OfflineTutor(self).respond(uid, lesson, context, message, note=note)
             return
         if self.llm is not None and self.llm.chat_ready():
@@ -396,14 +451,19 @@ class Agent:
         if log_intent or not (self.llm is not None and self.llm.chat_ready()):
             yield from OfflineTutor(self).respond(
                 uid, lesson, context, message,
-                note="以工具模式修改 example.py（會寫入中間 Lab 編輯器並標註 Hermes）。",
+                note=loc_text(
+                    context,
+                    "以工具模式修改 example.py（會寫入中間 Lab 編輯器並標註 Hermes）。",
+                    "Tool mode: editing example.py (writes into the Lab editor with Hermes marks).",
+                ),
             )
             return
         nudge = (
             "\n\n[REQUIRED] The learner asked to change this lesson's example.py / coding. "
             "You MUST call apply_code now with the COMPLETE updated example.py (full file). "
             "Do not only describe the edit. The middle Lab editor updates only via apply_code; "
-            "yellow Hermes marks and # [Hermes] notes will show who changed it."
+            "yellow Hermes marks and # [Hermes] notes will show who changed it. "
+            f"Reply in {'English' if is_en(context) else 'Traditional Chinese'} to match the store UI locale."
         )
         applied = False
         final_bits = []
@@ -445,7 +505,11 @@ class Agent:
 
     def _hermes(self, uid, lesson, context, message):
         msgs = self.messages(uid, lesson, context, message)
-        yield {"type": "status", "text": "Hermes 思考中…", "mode": "hermes"}
+        yield {
+            "type": "status",
+            "text": loc_text(context, "Hermes 思考中…", "Hermes is thinking…"),
+            "mode": "hermes",
+        }
         final_answer, all_reasoning = "", ""
         for round_index in range(MAX_TOOL_ROUNDS + 1):
             streamer = TagStreamer()
@@ -886,8 +950,8 @@ class OfflineTutor:
         self.agent = agent
         self.t = agent.t
 
-    def sections(self, markdown):
-        parts, current, title = [], [], "簡介"
+    def sections(self, markdown, context=None):
+        parts, current, title = [], [], loc_text(context, "簡介", "Overview")
         for line in markdown.splitlines():
             if line.startswith("## "):
                 if current:
@@ -900,7 +964,12 @@ class OfflineTutor:
         return parts
 
     def respond(self, uid, lesson, context, message, note=None):
-        yield {"type": "status", "text": note or "離線模式：未偵測到執行中的本機 LLM，由規則式助教回答（可在上方「本機 LLM」面板下載並啟動 Hermes）。", "mode": "offline"}
+        default_note = loc_text(
+            context,
+            "離線模式：未偵測到執行中的本機 LLM，由規則式助教回答（可在上方「本機 LLM」面板下載並啟動 Hermes）。",
+            "Offline mode: no local LLM detected. The rule-based tutor is answering (download and start Hermes in the Local LLM panel).",
+        )
+        yield {"type": "status", "text": note or default_note, "mode": "offline"}
         answer_parts, reasoning = [], []
         lowered = message.strip()
         cmd, _, rest = lowered.partition(" ")
@@ -943,7 +1012,11 @@ class OfflineTutor:
         if cmd in ("/search", "/arxiv", "/youtube", "/fetch"):
             tool = {"/search": "web_search", "/arxiv": "arxiv_search", "/youtube": "youtube_search", "/fetch": "fetch_url"}[cmd]
             args = {"url": rest.strip()} if tool == "fetch_url" else {"query": rest.strip()}
-            reasoning.append(f"執行工具 {tool}({json.dumps(args, ensure_ascii=False)})")
+            reasoning.append(loc_text(
+                context,
+                f"執行工具 {tool}({json.dumps(args, ensure_ascii=False)})",
+                f"Running tool {tool}({json.dumps(args, ensure_ascii=False)})",
+            ))
             yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
             yield {"type": "tool_call", "name": tool, "arguments": args}
             result, events = self.agent.run_tool(uid, lesson, context, tool, args)
@@ -951,29 +1024,59 @@ class OfflineTutor:
                 yield e
             yield {"type": "tool_result", "name": tool, "result": self.agent.summarize(result)}
             if result.get("error"):
-                answer_parts.append(f"工具錯誤：{result['error']}")
+                answer_parts.append(loc_text(context, f"工具錯誤：{result['error']}", f"Tool error: {result['error']}"))
             elif tool == "fetch_url":
                 answer_parts.append(f"**{result.get('title') or result['url']}**\n\n{result.get('text', '')[:3000]}")
             else:
                 lines = [f"- [{r['title']}]({r['url']})" + (f" — {r['snippet'][:160]}" if r.get("snippet") else "") for r in result.get("results", [])]
-                answer_parts.append("找到：\n" + ("\n".join(lines) if lines else "（沒有結果）"))
+                answer_parts.append(loc_text(
+                    context,
+                    "找到：\n" + ("\n".join(lines) if lines else "（沒有結果）"),
+                    "Found:\n" + ("\n".join(lines) if lines else "(no results)"),
+                ))
                 if lines and cmd != "/fetch":
-                    answer_parts.append("若值得做成課程，輸入 `/propose <標題>` 可建立待審提案。")
+                    answer_parts.append(loc_text(
+                        context,
+                        "若值得做成課程，輸入 `/propose <標題>` 可建立待審提案。",
+                        "If this is worth a lesson, type `/propose <title>` to create a pending proposal.",
+                    ))
         elif cmd == "/propose":
-            title = rest.strip() or "Hermes 提案"
+            title = rest.strip() or loc_text(context, "Hermes 提案", "Hermes proposal")
             result, events = self.agent.run_tool(uid, lesson, context, "propose_course",
-                                                 {"title": title, "summary": f"由離線助教在 {lesson['id']} 對話中建立。", "category": lesson.get("category", "other"),
+                                                 {"title": title, "summary": loc_text(
+                                                     context,
+                                                     f"由離線助教在 {lesson['id']} 對話中建立。",
+                                                     f"Created by the offline tutor during chat on {lesson['id']}.",
+                                                 ), "category": lesson.get("category", "other"),
                                                   "sources": [{"type": "docs", "title": r["title"], "url": r["url"]} for r in lesson.get("references", [])[:3]],
-                                                  "body": f"# {title}\n\n待補充：請描述新功能、對應 API 與練習。"})
+                                                  "body": f"# {title}\n\n" + loc_text(
+                                                      context,
+                                                      "待補充：請描述新功能、對應 API 與練習。",
+                                                      "TODO: describe the new feature, APIs, and exercises.",
+                                                  )})
             for e in events:
                 yield e
-            answer_parts.append(f"已建立待審提案 `{result.get('proposal_id')}`，可在 tutorial 頁面的「待審課程」檢視。" if result.get("ok") else f"提案失敗：{result.get('error')}")
+            if result.get("ok"):
+                answer_parts.append(loc_text(
+                    context,
+                    f"已建立待審提案 `{result.get('proposal_id')}`，可在 tutorial 頁面的「待審課程」檢視。",
+                    f"Created pending proposal `{result.get('proposal_id')}`. Review it under Course proposals.",
+                ))
+            else:
+                answer_parts.append(loc_text(context, f"提案失敗：{result.get('error')}", f"Proposal failed: {result.get('error')}"))
         elif cmd == "/params":
             kv = dict(re.findall(r"([a-zA-Z_][\w]*)\s*=\s*([^\s,]+)", rest))
             result, events = self.agent.run_tool(uid, lesson, context, "set_params", {"params": kv})
             for e in events:
                 yield e
-            answer_parts.append(f"參數已更新：`{json.dumps(result.get('params', {}), ensure_ascii=False)}`" if result.get("ok") else f"參數錯誤：{result.get('error')}")
+            if result.get("ok"):
+                answer_parts.append(loc_text(
+                    context,
+                    f"參數已更新：`{json.dumps(result.get('params', {}), ensure_ascii=False)}`",
+                    f"Params updated: `{json.dumps(result.get('params', {}), ensure_ascii=False)}`",
+                ))
+            else:
+                answer_parts.append(loc_text(context, f"參數錯誤：{result.get('error')}", f"Param error: {result.get('error')}"))
         elif cmd == "/run":
             yield {"type": "tool_call", "name": "start_run", "arguments": {}}
             result, events = self.agent.run_tool(uid, lesson, context, "start_run", {})
@@ -981,9 +1084,13 @@ class OfflineTutor:
                 yield e
             yield {"type": "tool_result", "name": "start_run", "result": self.agent.summarize(result)}
             if result.get("ok"):
-                answer_parts.append(f"已送出執行 `{result['run_id'][:8]}`（{result['runtime']}），狀態：{result['state']}。" + (f"\n\n{result['error']}" if result.get("error") else ""))
+                answer_parts.append(loc_text(
+                    context,
+                    f"已送出執行 `{result['run_id'][:8]}`（{result['runtime']}），狀態：{result['state']}。" + (f"\n\n{result['error']}" if result.get("error") else ""),
+                    f"Queued run `{result['run_id'][:8]}` ({result['runtime']}), state: {result['state']}." + (f"\n\n{result['error']}" if result.get("error") else ""),
+                ))
             else:
-                answer_parts.append(f"無法執行：{result.get('error')}")
+                answer_parts.append(loc_text(context, f"無法執行：{result.get('error')}", f"Could not run: {result.get('error')}"))
         elif cmd == "/code":
             code = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
             needle = rest.strip()
@@ -991,10 +1098,17 @@ class OfflineTutor:
                 yield from self._repair_flow(uid, lesson, context, answer_parts, reasoning, do_repair=True, message=message)
             else:
                 hits = [f"L{i + 1}: {line.strip()}" for i, line in enumerate(code.splitlines()) if needle and needle.lower() in line.lower()]
-                answer_parts.append(("在 example.py 找到：\n```\n" + "\n".join(hits[:30]) + "\n```") if hits else "example.py 裡沒有這個字串。")
+                if hits:
+                    answer_parts.append(loc_text(
+                        context,
+                        "在 example.py 找到：\n```\n" + "\n".join(hits[:30]) + "\n```",
+                        "Found in example.py:\n```\n" + "\n".join(hits[:30]) + "\n```",
+                    ))
+                else:
+                    answer_parts.append(loc_text(context, "example.py 裡沒有這個字串。", "That string is not in example.py."))
         elif cmd == "/remember":
             self.t.memory_add(uid, [rest.strip()])
-            answer_parts.append("已記住。")
+            answer_parts.append(loc_text(context, "已記住。", "Remembered."))
         elif cmd in ("/log", "/diagnose", "/fix") or physx_in_msg or (wants_fix and cmd not in self.COMMANDS):
             # Auto-apply known example.py API fixes whenever the last run Traceback matches —
             # /log and /diagnose stay read-only unless the learner also asked to fix.
@@ -1011,26 +1125,35 @@ class OfflineTutor:
                 ),
                 message=message,
             )
-        elif cmd == "/help" or not lesson.get("markdown"):
-            answer_parts.append(self.help_text(lesson))
+        elif cmd == "/help" or not lesson_markdown_for_locale(lesson, context):
+            answer_parts.append(self.help_text(lesson, context=context))
         else:
             words = tokenize(message)
             scored = []
-            for title, body in self.sections(lesson.get("markdown", "")):
+            for title, body in self.sections(lesson_markdown_for_locale(lesson, context), context=context):
                 overlap = len(words & tokenize(title + " " + body))
                 scored.append((overlap, title, body))
             scored.sort(key=lambda s: -s[0])
-            reasoning.append(f"關鍵字比對課文章節：{[(s[1], s[0]) for s in scored[:3]]}")
+            reasoning.append(loc_text(
+                context,
+                f"關鍵字比對課文章節：{[(s[1], s[0]) for s in scored[:3]]}",
+                f"Matched lesson sections: {[(s[1], s[0]) for s in scored[:3]]}",
+            ))
             yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
             best = scored[0] if scored and scored[0][0] > 0 else None
             if best:
                 answer_parts.append(f"### {best[1]}\n\n{best[2][:2500]}")
             else:
-                answer_parts.append("我在課文裡找不到直接相關的段落。")
+                answer_parts.append(loc_text(
+                    context,
+                    "我在課文裡找不到直接相關的段落。",
+                    "I could not find a directly related section in the lesson text.",
+                ))
             api_hits = [api for api in lesson.get("apis", []) if any(w in api.lower() for w in words)]
             if api_hits:
-                answer_parts.append("相關 API：" + "、".join(f"`{a}`" for a in api_hits))
-            answer_parts.append(self.help_text(lesson, short=True))
+                sep = ", " if is_en(context) else "、"
+                answer_parts.append(loc_text(context, "相關 API：", "Related APIs: ") + sep.join(f"`{a}`" for a in api_hits))
+            answer_parts.append(self.help_text(lesson, short=True, context=context))
         text = "\n\n".join(answer_parts)
         for chunk in re.findall(r".{1,120}(?:\s|$)", text, re.S) or [text]:
             yield {"type": "token", "text": chunk}
@@ -1292,15 +1415,26 @@ class OfflineTutor:
             answer_parts.append("這是 example.py API 錯誤。輸入 `/fix` 或說「請修復」讓我改程式並寫入 Lab 編輯器。")
 
     @staticmethod
-    def help_text(lesson, short=False):
+    def help_text(lesson, short=False, context=None):
         params = ", ".join(f"`{p['key']}`" for p in lesson.get("params", [])[:8])
-        lines = ["可用指令：`/search`、`/arxiv`、`/youtube`、`/fetch`、`/params`、`/run`、`/code`、`/edit`、`/log`、`/analyze`、`/diagnose`、`/fix`、`/propose`、`/remember`、`/help`。"]
-        if not short:
-            lines.append(
-                f"這堂課的參數：{params or '（無）'}。執行失敗時直接說「請修復」或打 `/fix`；"
-                "跑完想看結果／影片／rollout 請說「分析結果」或打 `/analyze`；"
-                "要加 log／改 example.py 請說「加上 log」或 `/edit`（會寫入中間編輯器並標註 Hermes）。"
-            )
+        if is_en(context):
+            lines = [
+                "Commands: `/search`, `/arxiv`, `/youtube`, `/fetch`, `/params`, `/run`, `/code`, `/edit`, `/log`, `/analyze`, `/diagnose`, `/fix`, `/propose`, `/remember`, `/help`."
+            ]
+            if not short:
+                lines.append(
+                    f"Lesson params: {params or '(none)'}. If a run fails, say “please fix” or type `/fix`; "
+                    "after a run, say “analyze results” or type `/analyze`; "
+                    "to add logs / edit example.py, say “add logs” or `/edit` (writes into the Lab editor with Hermes marks)."
+                )
+        else:
+            lines = ["可用指令：`/search`、`/arxiv`、`/youtube`、`/fetch`、`/params`、`/run`、`/code`、`/edit`、`/log`、`/analyze`、`/diagnose`、`/fix`、`/propose`、`/remember`、`/help`。"]
+            if not short:
+                lines.append(
+                    f"這堂課的參數：{params or '（無）'}。執行失敗時直接說「請修復」或打 `/fix`；"
+                    "跑完想看結果／影片／rollout 請說「分析結果」或打 `/analyze`；"
+                    "要加 log／改 example.py 請說「加上 log」或 `/edit`（會寫入中間編輯器並標註 Hermes）。"
+                )
         return "\n".join(lines)
 
 

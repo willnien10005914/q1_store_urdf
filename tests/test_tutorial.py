@@ -312,6 +312,32 @@ class AgentTests(unittest.TestCase):
         events = list(self.agent.chat(self.uid, lesson["id"], "/params num_envs=64", {"robot": "leg", "params": {}}))
         self.assertTrue(any(e.get("type") == "params" for e in events))
 
+    def test_hermes_follows_store_locale(self):
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
+        zh_prompt = self.agent.system_prompt(self.uid, lesson, {"robot": "leg", "locale": "zh-Hant"})
+        en_prompt = self.agent.system_prompt(self.uid, lesson, {"robot": "leg", "locale": "en"})
+        self.assertIn("Traditional Chinese", zh_prompt)
+        self.assertIn("Store UI locale: zh-Hant", zh_prompt)
+        self.assertIn("UI locale is English", en_prompt)
+        self.assertIn("Store UI locale: en", en_prompt)
+        self.assertIn("architecture overview", en_prompt.lower())
+        en_help = list(self.agent.chat(
+            self.uid, lesson["id"], "/help",
+            {"robot": "leg", "params": {}, "locale": "en"},
+        ))
+        help_text = "".join(e.get("text", "") for e in en_help if e.get("type") == "token")
+        status = next(e for e in en_help if e.get("type") == "status")
+        self.assertIn("Tool mode", status["text"])
+        self.assertIn("Commands:", help_text)
+        zh_help = list(self.agent.chat(
+            self.uid, lesson["id"], "/help",
+            {"robot": "leg", "params": {}, "locale": "zh-Hant"},
+        ))
+        zh_text = "".join(e.get("text", "") for e in zh_help if e.get("type") == "token")
+        zh_status = next(e for e in zh_help if e.get("type") == "status")
+        self.assertIn("工具模式", zh_status["text"])
+        self.assertIn("這堂課的參數", zh_text)
+
     def test_diagnose_runtime_tool(self):
         lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
         result, events = self.agent.run_tool(self.uid, lesson, {"robot": "leg"}, "diagnose_runtime", {})

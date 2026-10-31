@@ -1040,7 +1040,7 @@ function renderRefs(lesson) {
   const box = $('refs');
   box.innerHTML = (lesson.references || []).map((r) =>
     `<li><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title)}<small>${escapeHtml(r.type || 'web')} · ${escapeHtml(r.url)}</small></a></li>`
-  ).join('') || '<li class="tut-empty">無參考資料</li>';
+  ).join('') || `<li class="tut-empty">${escapeHtml(getLocale() === 'en' ? 'No references.' : '無參考資料')}</li>`;
 }
 
 function runIsBusy(run) {
@@ -1053,7 +1053,7 @@ function setRunBusy(busy, run = null) {
   if (!btn) return;
   btn.disabled = !!busy;
   if (!busy) {
-    btn.textContent = getLocale() === 'en' ? 'Run' : '執行';
+    btn.textContent = t('school_run');
     return;
   }
   const label = {
@@ -1587,6 +1587,7 @@ async function sendChat() {
           params: collectParams(),
           code: $('code').value,
           last_run: state.lastRun || null,
+          locale: getLocale() === 'en' ? 'en' : 'zh-Hant',
         },
       }),
     });
