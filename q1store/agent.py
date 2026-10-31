@@ -101,9 +101,9 @@ ISAAC_SIM_MISSING_HINT = re.compile(
     re.I,
 )
 EXAMPLE_API_HINT = re.compile(
-    r"unexpected keyword argument|TypeError:|AttributeError:|got an unexpected keyword|"
+    r"unexpected keyword argument|TypeError:|AttributeError:|KeyError:|got an unexpected keyword|"
     r"NewtonCfg\.__init__|PhysxCfg\.__init__|has no attribute|"
-    r"get_masses|body_mass|"
+    r"get_masses|body_mass|class_name|RslRlPpoActorCriticCfg|"
     r"File \"example\.py\"|"
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
@@ -1328,6 +1328,23 @@ def fix_known_example_api_errors(
             if text2 != text:
                 text = text2
                 notes.append("PhysxCfg() 硬編碼 → physics preset（預設 newton_mjwarp）")
+
+    # Deprecated RSL-RL policy=ActorCritic → actor/critic MLPModel (needs class_name).
+    if (
+        ("class_name" in err and ("actor" in err.lower() or "KeyError" in err))
+        or "RslRlPpoActorCriticCfg" in text
+    ) and (
+        "RslRlPpoActorCriticCfg" in text
+        or re.search(r"\bpolicy\s*=\s*RslRlPpoActorCriticCfg\s*\(", text)
+        or (lesson_id or "").startswith("l06")
+    ):
+        canon = (canonical_code or "").strip()
+        if canon and "RslRlMLPModelCfg" in canon and "actor =" in canon and canon != text.strip():
+            notes.append(
+                "RslRlPpoActorCriticCfg(policy=…) → actor/critic=RslRlMLPModelCfg（rsl-rl 5.x class_name）"
+            )
+            note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
+            return _stamp_hermes_note(canon if canon.endswith("\n") else canon + "\n", note), note
 
     # root_view.get_masses() is PhysX-only; Lab 3 portable path is data.body_mass (ProxyArray).
     if "get_masses" in err or re.search(r"root_view\.get_masses\s*\(", text):

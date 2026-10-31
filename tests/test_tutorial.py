@@ -322,6 +322,22 @@ class AgentTests(unittest.TestCase):
         self.assertIn("q1_store_urdf", tokens)
         self.assertNotIn("請貼出關鍵行", tokens)
 
+    def test_fix_l06_rsl_rl_actor_class_name(self):
+        err = "KeyError: 'class_name'\n  File \"example.py\", line 179\n"
+        broken = (
+            "from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg\n"
+            "policy = RslRlPpoActorCriticCfg(init_noise_std=1.0, actor_hidden_dims=[512, 256, 128], "
+            "critic_hidden_dims=[512, 256, 128], activation=\"elu\")\n"
+        )
+        canon = (ROOT / "tutorials/lessons/l06-manager-based-ppo/example.py").read_text()
+        fixed, note = fix_known_example_api_errors(
+            broken, err, "l06-manager-based-ppo", canonical_code=canon,
+        )
+        self.assertIn("RslRlMLPModelCfg", fixed)
+        self.assertIn("actor =", fixed)
+        self.assertNotIn("RslRlPpoActorCriticCfg", fixed)
+        self.assertIn("class_name", note.lower() + "mlp")
+
     def test_fix_get_masses_to_body_mass(self):
         err = "AttributeError: 'ArticulationView' object has no attribute 'get_masses'\n"
         broken = "masses = robot.root_view.get_masses() if hasattr(robot, \"root_view\") else None\n"
