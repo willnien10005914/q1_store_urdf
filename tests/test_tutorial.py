@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from q1store.agent import Agent, OfflineTutor, TagStreamer
+from q1store.agent import Agent, OfflineTutor, TagStreamer, inject_progress_logging, EDIT_HINT
 from q1store.llm import LLMManager, MODELS
 from q1store.service import Store
 from q1store.tutorial import Tutorial, parse_front_matter, dump_front_matter
@@ -236,6 +236,23 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(any(e.get("name") == "analyze_run" for e in events if e.get("type") == "tool_call"))
         tokens = "".join(e.get("text", "") for e in events if e.get("type") == "token")
         self.assertIn("執行分析", tokens)
+
+    def test_offline_add_log_applies_to_editor(self):
+        self.assertTrue(EDIT_HINT.search("請在第一課程加上 log"))
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
+        code = (ROOT / "tutorials/lessons/l01-isaaclab3-overview/example.py").read_text()
+        instrumented, _ = inject_progress_logging(code, lesson["id"])
+        self.assertIn("[hermes-log]", instrumented)
+        self.assertNotEqual(instrumented, code)
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "請在第一課程加上 log",
+            {"robot": "leg", "params": {}, "code": code},
+        ))
+        apply = next(e for e in events if e.get("type") == "code_apply")
+        self.assertEqual(apply.get("author"), "Hermes")
+        self.assertIn("[hermes-log]", apply.get("code") or "")
+        draft = self.t.progress_row(self.uid, lesson["id"]).get("draft_code") or ""
+        self.assertIn("[hermes-log]", draft)
 
 
 class TutorialHTTPTests(unittest.TestCase):

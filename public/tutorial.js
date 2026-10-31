@@ -371,13 +371,36 @@ function setCode(value, {baseline = false, marks = null, expand = false} = {}) {
   if (expand) setCodeExpanded(true);
 }
 
-function annotateChangedLines(before, after, source, explanation) {
+function applyHermesCode(ev) {
+  if (!ev?.code) return;
+  const before = $('code')?.value || '';
+  const author = ev.author || 'Hermes';
+  const explanation = ev.explanation || '';
+  const annotated = annotateChangedLines(before, ev.code, 'hermes', explanation, author);
+  setCode(annotated, {expand: true});
+  state.baselineCode = annotated;
+  document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
+  document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
+  requestAnimationFrame(() => syncCodeChrome());
+  if (state.user && state.lessonId) {
+    api(`/api/tutorial/users/${state.user.id}/lessons/${state.lessonId}/draft`, {
+      code: annotated,
+      params: collectParams(),
+    }).catch(() => {});
+  }
+  toast(getLocale() === 'en'
+    ? `${author} edit applied — yellow lines; press Run`
+    : `已套用 ${author} 的修改（黃線＋# [${author}]），請檢查後按「執行」`);
+}
+
+function annotateChangedLines(before, after, source, explanation, author) {
   const changed = lineDiffIndexes(before, after);
   if (!changed.size) return after;
   const lines = after.split('\n');
   const note = (explanation || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  const who = author || (source === 'hermes' ? 'Hermes' : (getLocale() === 'en' ? 'You' : '手動'));
   const tag = source === 'hermes'
-    ? `# [Hermes] ${note || (getLocale() === 'en' ? 'Suggested edit — press Run to verify.' : '建議修改 — 請按「執行」驗證。')}`
+    ? `# [${who}] ${note || (getLocale() === 'en' ? 'Suggested edit — press Run to verify.' : '建議修改 — 請按「執行」驗證。')}`
     : `# [手動] ${note || (getLocale() === 'en' ? 'Your edit — press Run to verify.' : '你的修改 — 請按「執行」驗證。')}`;
   const out = [];
   const newMarks = {...state.codeMarks};
@@ -1314,9 +1337,11 @@ async function sendChat() {
           div.insertBefore(t, body);
         } else if (ev.type === 'code_proposal') {
           state.pendingDiff = ev;
-          $('diff-explain').textContent = ev.explanation || '';
+          $('diff-explain').textContent = (ev.author ? `[${ev.author}] ` : '') + (ev.explanation || '');
           $('diff-body').textContent = ev.diff || ev.code || '';
           $('diff-dialog').showModal();
+        } else if (ev.type === 'code_apply') {
+          applyHermesCode(ev);
         } else if (ev.type === 'params') {
           Object.entries(ev.params || {}).forEach(([k, v]) => {
             const el = $('params').querySelector(`[data-param="${k}"]`);
@@ -1490,15 +1515,8 @@ function wire() {
   $('diff-accept').addEventListener('click', async () => {
     if (!state.pendingDiff || !state.user) return;
     await api('/api/agent/accept', {user: state.user.id, lesson: state.lessonId, proposal_id: state.pendingDiff.proposal_id});
-    const before = $('code').value;
-    const raw = state.pendingDiff.code || before;
-    const annotated = annotateChangedLines(before, raw, 'hermes', state.pendingDiff.explanation || '');
-    setCode(annotated, {expand: true});
-    state.baselineCode = annotated;
-    document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
-    document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
+    applyHermesCode(state.pendingDiff);
     $('diff-dialog').close();
-    toast(getLocale()==='en'?'Hermes edit applied — review yellow lines, then Run':'已採用 Hermes 修改（黃線），請檢查後按「執行」');
   });
 
   window.addEventListener('hashchange', () => {

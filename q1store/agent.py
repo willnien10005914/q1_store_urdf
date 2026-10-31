@@ -40,7 +40,9 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {}}},
     {"name": "repair_physx_joint", "description": "Patch kitless URDF importer so PhysxJointAPI ApplyAPI failures are skipped (newton_mjwarp without full Isaac Sim). Use when run.log shows ApplyAPI / PhysxJointAPI / PhysxSchema errors.",
      "parameters": {"type": "object", "properties": {}}},
-    {"name": "propose_code", "description": "Propose a full replacement example.py. The learner sees a diff and must accept it; explain why.",
+    {"name": "propose_code", "description": "Propose a full replacement example.py. By default the learner sees a diff and must accept it. Set apply=true to push the edit into the Lab code editor immediately (with Hermes attribution marks). Always call this (or apply_code) before claiming you changed example.py.",
+     "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "explanation": {"type": "string"}, "apply": {"type": "boolean"}}, "required": ["code", "explanation"]}},
+    {"name": "apply_code", "description": "Write a full replacement example.py straight into the learner's Lab editor (yellow Hermes marks + # [Hermes] notes). Use when the learner asks to 加 log / 改程式 / edit example.py so the middle pane updates without waiting for a diff dialog.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "explanation": {"type": "string"}}, "required": ["code", "explanation"]}},
     {"name": "set_params", "description": "Set lesson parameters (sliders) for the learner, e.g. {\"num_envs\": 2048}.",
      "parameters": {"type": "object", "properties": {"params": {"type": "object"}}, "required": ["params"]}},
@@ -64,6 +66,19 @@ ANALYZE_HINT = re.compile(
     r"(訓練後|跑完|完成後).{0,12}(結果|影片|rollout|推論)|"
     r"(播放|看).{0,8}(影片|video|mp4|rollout|推論)|"
     r"\b(analyze|metrics?|inference|rollout|result\.mp4)\b)",
+    re.I,
+)
+EDIT_HINT = re.compile(
+    r"(加\s*(上)?\s*(log|print|logging|日誌|除錯|debug)|"
+    r"加上?.{0,8}(log|print|logging|日誌)|"
+    r"(insert|add)\s+(more\s+)?(log|print|logging)|"
+    r"(改|修改|編輯|更新).{0,16}(example\.py|程式|code|範例)|"
+    r"(幫我|請).{0,8}(改|加|寫).{0,16}(log|print|日誌|程式|code)|"
+    r"/edit|/logcode)",
+    re.I,
+)
+LOG_EDIT_HINT = re.compile(
+    r"(log|print|logging|日誌|除錯|debug|progress\.json|run\.log)",
     re.I,
 )
 PHYSX_HINT = re.compile(r"physxjointapi|physxschema|add_joint_schemas|cannot find a valid schema", re.I)
@@ -189,16 +204,20 @@ class Agent:
             "3) if diagnose reports torch/driver mismatch call repair_isaaclab_cuda, "
             "4) if the error mentions PhysxJointAPI / PhysxSchema / ApplyAPI call repair_physx_joint (kitless URDF; NOT an example.py string search), "
             "5) if No module named 'isaacsim' call repair_isaaclab_importers, "
-            "6) for real example.py bugs use propose_code, 7) then start_run to verify. "
+            "6) for real example.py bugs or when the learner asks to 加 log / 改程式: call apply_code (or propose_code with apply=true) "
+            "with the FULL updated example.py — never claim you edited the file without that tool. "
+            "7) then start_run to verify. "
             "When the learner asks about 結果/影片/rollout/推論/metrics after a run: call analyze_run, summarize metrics honestly, "
             "and tell them the Lab panel plays result.mp4 (if present) or the Three.js rollout player. "
             "Do NOT ask which lesson — you already know it from context. Never reply that you cannot understand a fix request. "
             "Never answer a runtime Traceback with only「example.py 裡沒有這個字串」— that means you used /code instead of repairing. "
-            "Never say you cannot analyze run results — use analyze_run.\n\n"
+            "Never say you cannot analyze run results — use analyze_run. "
+            "Never say「已加上 log／已改好」unless apply_code/propose_code succeeded; the Lab editor shows yellow Hermes marks and `# [Hermes]` notes.\n\n"
             "Always start your reply with your reasoning inside <think></think>, then the answer. "
             "You have tools. To call one, emit exactly: <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call> and stop; the result arrives in a "
-            "<tool_response> message, after which you continue. Never fabricate tool results. Use propose_code for any code change (full file), "
-            "set_params for slider changes, start_run to execute, analyze_run for post-run results, propose_course when you discover new Isaac Lab 3 material worth a lesson.\n"
+            "<tool_response> message, after which you continue. Never fabricate tool results. Use apply_code for learner-requested edits (加 log 等), "
+            "propose_code for optional review diffs, set_params for slider changes, start_run to execute, analyze_run for post-run results, "
+            "propose_course when you discover new Isaac Lab 3 material worth a lesson.\n"
             f"<tools>{json.dumps(TOOLS, ensure_ascii=False)}</tools>\n\n"
             f"Learner: {progress.get('name')} · level {progress['level']['id']} · {progress['completed']}/{progress['total']} lessons done.\n"
             f"Memory about the learner: {json.dumps(memory, ensure_ascii=False) if memory else 'none yet'}\n"
@@ -245,14 +264,21 @@ class Agent:
         # Slash commands + repair/analyze intents must run real tools. The 8B Hermes GGUF often
         # ignores <tool_call> and just asks for more info — never let that block fixes or result review.
         cmd = message.split(None, 1)[0] if message else ""
-        wants_analyze = bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message))
-        force_tools = cmd.startswith("/") or bool(REPAIR_HINT.search(message)) or wants_analyze
+        wants_analyze = bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message)) and not bool(EDIT_HINT.search(message))
+        wants_edit = bool(EDIT_HINT.search(message)) and not bool(REPAIR_HINT.search(message))
+        force_tools = (
+            cmd.startswith("/")
+            or bool(REPAIR_HINT.search(message))
+            or wants_analyze
+            or wants_edit
+        )
         if force_tools:
-            note = (
-                "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。"
-                if wants_analyze or cmd in ("/analyze", "/result")
-                else "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。"
-            )
+            if wants_edit or cmd in ("/edit", "/logcode"):
+                note = "以工具模式修改 example.py（加 log／編輯會寫入中間 Lab 編輯器並標註 Hermes）。"
+            elif wants_analyze or cmd in ("/analyze", "/result"):
+                note = "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。"
+            else:
+                note = "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。"
             yield from OfflineTutor(self).respond(uid, lesson, context, message, note=note)
             return
         if self.llm is not None and self.llm.chat_ready():
@@ -329,16 +355,11 @@ class Agent:
                 return self._repair_isaaclab_importers(), events
             if name == "repair_physx_joint":
                 return self._repair_physx_joint(), events
-            if name == "propose_code":
-                code = str(arguments.get("code", ""))
-                if not code.strip():
-                    return {"error": "empty code"}, events
-                current = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
-                diff = "".join(difflib.unified_diff(current.splitlines(True), code.splitlines(True), "example.py (current)", "example.py (proposed)"))
-                proposal = self.t.append_message(uid, lesson["id"], "proposal", code, explanation=str(arguments.get("explanation", ""))[:2000], diff=diff[:20000])
-                events.append({"type": "code_proposal", "proposal_id": proposal["id"], "code": code, "diff": diff[:20000],
-                               "explanation": arguments.get("explanation", "")})
-                return {"ok": True, "proposal_id": proposal["id"], "diff_lines": diff.count("\n"), "note": "learner must accept the diff in the editor"}, events
+            if name in ("propose_code", "apply_code"):
+                return self._code_edit(
+                    uid, lesson, context, arguments,
+                    apply=(name == "apply_code") or bool(arguments.get("apply")),
+                )
             if name == "set_params":
                 params = arguments.get("params") or {}
                 if not isinstance(params, dict):
@@ -369,6 +390,59 @@ class Agent:
             return {"error": f"unknown tool {name}"}, events
         except APIError as exc:
             return {"error": str(exc)}, events
+
+    def _code_edit(self, uid, lesson, context, arguments, apply=False):
+        """Shared propose/apply path. Returns (result, events)."""
+        events = []
+        code = str(arguments.get("code", ""))
+        explanation = str(arguments.get("explanation", ""))[:2000]
+        if not code.strip():
+            return {"error": "empty code"}, events
+        current = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
+        if code.rstrip() + "\n" == (current.rstrip() + "\n") or code == current:
+            return {"ok": False, "error": "proposed code is identical to the editor — nothing to apply", "unchanged": True}, events
+        diff = "".join(difflib.unified_diff(
+            current.splitlines(True), code.splitlines(True),
+            "example.py (current)", "example.py (proposed)",
+        ))
+        proposal = self.t.append_message(
+            uid, lesson["id"], "proposal", code,
+            explanation=explanation, diff=diff[:20000],
+        )
+        if apply:
+            # Persist as the active draft so Run / reload keep Hermes' edit.
+            self.t.save_draft(uid, lesson["id"], code=code, params=context.get("params"))
+            context["code"] = code
+            events.append({
+                "type": "code_apply",
+                "proposal_id": proposal["id"],
+                "code": code,
+                "diff": diff[:20000],
+                "explanation": explanation,
+                "author": "Hermes",
+            })
+            return {
+                "ok": True,
+                "applied": True,
+                "proposal_id": proposal["id"],
+                "diff_lines": diff.count("\n"),
+                "note": "Lab editor updated with Hermes marks; learner should review yellow lines then Run",
+            }, events
+        events.append({
+            "type": "code_proposal",
+            "proposal_id": proposal["id"],
+            "code": code,
+            "diff": diff[:20000],
+            "explanation": explanation,
+            "author": "Hermes",
+        })
+        return {
+            "ok": True,
+            "applied": False,
+            "proposal_id": proposal["id"],
+            "diff_lines": diff.count("\n"),
+            "note": "learner must accept the diff in the editor",
+        }, events
 
     def _resolve_run(self, uid, lesson_id, run_id=None, log_lines=80):
         run = None
@@ -645,7 +719,7 @@ class OfflineTutor:
     """Deterministic fallback when no LLM is running: answers from lesson.md, supports slash commands."""
 
     COMMANDS = ("/search", "/arxiv", "/youtube", "/fetch", "/run", "/params", "/code", "/remember",
-                "/fix", "/diagnose", "/log", "/analyze", "/result", "/help")
+                "/fix", "/diagnose", "/log", "/analyze", "/result", "/edit", "/logcode", "/help")
 
     def __init__(self, agent):
         self.agent = agent
@@ -673,7 +747,10 @@ class OfflineTutor:
         wants_fix = bool(REPAIR_HINT.search(message)) or bool((context.get("last_run") or {}).get("error"))
         wants_analyze = (
             cmd in ("/analyze", "/result")
-            or (bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message)))
+            or (bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message)) and not bool(EDIT_HINT.search(message)))
+        )
+        wants_edit = cmd in ("/edit", "/logcode") or (
+            bool(EDIT_HINT.search(message)) and not bool(REPAIR_HINT.search(message))
         )
         physx_in_msg = bool(PHYSX_HINT.search(message)) or bool(PHYSX_HINT.search(last_err))
         # /code PhysxJointAPI must not become「example.py 裡沒有這個字串」— route to repair.
@@ -682,6 +759,14 @@ class OfflineTutor:
                 uid, lesson, context, answer_parts, reasoning,
                 do_repair=True, message=message,
             )
+            text = "\n\n".join(answer_parts)
+            for chunk in re.findall(r".{1,120}(?:\s|$)", text, re.S) or [text]:
+                yield {"type": "token", "text": chunk}
+            saved = self.t.append_message(uid, lesson["id"], "assistant", text, reasoning="\n".join(reasoning), mode="offline")
+            yield {"type": "done", "message_id": saved["id"], "mode": "offline"}
+            return
+        if wants_edit:
+            yield from self._edit_flow(uid, lesson, context, answer_parts, reasoning, message=message)
             text = "\n\n".join(answer_parts)
             for chunk in re.findall(r".{1,120}(?:\s|$)", text, re.S) or [text]:
                 yield {"type": "token", "text": chunk}
@@ -818,6 +903,32 @@ class OfflineTutor:
             lines.append(f"執行錯誤：{info['error']}（若要修環境請用 `/fix`）。")
         answer_parts.append("\n\n".join(p for p in lines if p))
 
+    def _edit_flow(self, uid, lesson, context, answer_parts, reasoning, message=""):
+        current = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
+        if not current.strip():
+            answer_parts.append("目前沒有 example.py 可改。")
+            return
+        # Offline deterministic edit: instrument progress/phase logs (esp. 「加 log」on l01).
+        reasoning.append("在 example.py 加上 progress／階段 print log，並套用到 Lab 編輯器")
+        yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+        new_code, note = inject_progress_logging(current, lesson_id=lesson.get("id") or "")
+        if new_code == current:
+            answer_parts.append("程式裡已有 Hermes／進度 log，沒有再改。若要別種修改，請具體說要改哪一段。")
+            return
+        args = {"code": new_code, "explanation": note}
+        yield {"type": "tool_call", "name": "apply_code", "arguments": {"explanation": note}}
+        result, events = self.agent.run_tool(uid, lesson, context, "apply_code", args)
+        for e in events:
+            yield e
+        yield {"type": "tool_result", "name": "apply_code", "result": self.agent.summarize(result)}
+        if result.get("ok") and result.get("applied"):
+            answer_parts.append(
+                f"已把修改寫入中間 **Lab／example.py** 編輯器（黃線＝Hermes，註解 `# [Hermes]`）。\n\n"
+                f"{note}\n\n請切到「實作」分頁檢查後按「執行」。"
+            )
+        else:
+            answer_parts.append(f"無法套用修改：{result.get('error') or result}")
+
     def _repair_flow(self, uid, lesson, context, answer_parts, reasoning, do_repair=False, message=""):
         reasoning.append("讀取最近執行紀錄並診斷 runtime")
         yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
@@ -933,10 +1044,70 @@ class OfflineTutor:
     @staticmethod
     def help_text(lesson, short=False):
         params = ", ".join(f"`{p['key']}`" for p in lesson.get("params", [])[:8])
-        lines = ["可用指令：`/search`、`/arxiv`、`/youtube`、`/fetch`、`/params`、`/run`、`/code`、`/log`、`/analyze`、`/diagnose`、`/fix`、`/propose`、`/remember`、`/help`。"]
+        lines = ["可用指令：`/search`、`/arxiv`、`/youtube`、`/fetch`、`/params`、`/run`、`/code`、`/edit`、`/log`、`/analyze`、`/diagnose`、`/fix`、`/propose`、`/remember`、`/help`。"]
         if not short:
             lines.append(
                 f"這堂課的參數：{params or '（無）'}。執行失敗時直接說「請修復」或打 `/fix`；"
-                "跑完想看結果／影片／rollout 請說「分析結果」或打 `/analyze`。"
+                "跑完想看結果／影片／rollout 請說「分析結果」或打 `/analyze`；"
+                "要加 log／改 example.py 請說「加上 log」或 `/edit`（會寫入中間編輯器並標註 Hermes）。"
             )
         return "\n".join(lines)
+
+
+def inject_progress_logging(code: str, lesson_id: str = "") -> tuple[str, str]:
+    """Deterministically add stdout logs around progress() / key phases. Idempotent."""
+    if not code:
+        return code, "empty code"
+    if "[hermes-log]" in code or "Hermes progress log" in code:
+        return code, "already instrumented"
+    lines = code.splitlines(True)
+    out: list[str] = []
+    inserted_progress_print = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        # After progress() writes progress.json, mirror to stdout for run.log.
+        if (
+            not inserted_progress_print
+            and re.search(r'progress\.json"\)\.write_text\(', line)
+        ):
+            indent = re.match(r"^(\s*)", line).group(1)
+            # Include following continuation lines of write_text(...) if any.
+            while i + 1 < len(lines) and not lines[i].rstrip().endswith(")"):
+                i += 1
+                out.append(lines[i])
+            out.append(f'{indent}print(f"[hermes-log] phase={{phase}} iter={{iteration}}/{{total}} extra={{extra}}", flush=True)  # Hermes progress log\n')
+            inserted_progress_print = True
+        i += 1
+    text = "".join(out)
+    # Lesson-01 style: log physics choice right after PHYSICS is resolved.
+    if "PHYSICS =" in text and 'print(f"[hermes-log] physics=' not in text:
+        physics_log = (
+            'print(f"[hermes-log] physics={PHYSICS} robot={P.get(\'robot\')} '
+            'envs={P.get(\'num_envs\')}", flush=True)  # Hermes startup log\n'
+        )
+        text = re.sub(r"(PHYSICS\s*=\s*P\.get\([^\n]+\)\n)", r"\1" + physics_log, text, count=1)
+    # Before writing result.json, log summary keys if a summary dict exists.
+    if "result.json" in text and 'print(f"[hermes-log] result=' not in text:
+        result_log = 'print(f"[hermes-log] result={summary}", flush=True)  # Hermes result log\n    '
+        text = re.sub(
+            r'(\(JOB\s*/\s*"result\.json"\)\.write_text\()',
+            result_log + r"\1",
+            text,
+            count=1,
+        )
+    if text == code and not inserted_progress_print:
+        # Fallback: append a module-level note + print after STARTED if present.
+        if "STARTED = time.monotonic()" in text and "[hermes-log] boot" not in text:
+            boot_log = (
+                "STARTED = time.monotonic()\n"
+                "print(f\"[hermes-log] boot lesson={P.get('lesson_id', '?')} "
+                "robot={P.get('robot')}\", flush=True)  # Hermes boot log"
+            )
+            text = text.replace("STARTED = time.monotonic()", boot_log, 1)
+    note = (
+        f"Hermes 在 {lesson_id or 'example.py'} 加上 `[hermes-log]` 進度／階段 print，"
+        "執行時會出現在 run.log 與右側進度 log。"
+    )
+    return text, note
