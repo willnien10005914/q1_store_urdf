@@ -8,41 +8,204 @@
   "minutes": 40,
   "summary": "Isaac Sim 6 的 URDF importer 全面重寫（urdf-usd-converter）。本課用 UrdfConverterCfg 轉換 Q1 雙足／雙輪 URDF，檢查關節名稱、限位、質量、mimic 關節，並建立 3.0 的 ArticulationCfg。",
   "summary_en": "The URDF importer was rewritten for Isaac Sim 6 (urdf-usd-converter). Convert the Q1 biped/wheeled URDF with UrdfConverterCfg, inspect joint names, limits, mass and mimic joints, and build a 3.0 ArticulationCfg.",
-  "robots": ["leg", "wheel"],
-  "apis": ["isaaclab.sim.converters.UrdfConverterCfg", "UrdfConverterCfg.JointDriveCfg.PDGainsCfg", "sim_utils.UrdfFileCfg", "ArticulationCfg.InitialStateCfg", "robot.data.joint_pos_limits.torch", "scripts/tools/convert_urdf.py"],
+  "robots": [
+    "leg",
+    "wheel"
+  ],
+  "apis": [
+    "isaaclab.sim.converters.UrdfConverterCfg",
+    "UrdfConverterCfg.JointDriveCfg.PDGainsCfg",
+    "sim_utils.UrdfFileCfg",
+    "ArticulationCfg.InitialStateCfg",
+    "robot.data.joint_pos_limits.torch",
+    "scripts/tools/convert_urdf.py"
+  ],
   "params": [
-    {"key": "physics", "label": "物理 preset", "type": "select", "default": "newton_mjwarp",
-     "options": ["newton_mjwarp", "isaacsim_physx"],
-     "help": "newton_mjwarp：kitless，用 UrdfFileCfg（預設）。isaacsim_physx：顯式 UrdfConverter→USD，需要完整 Isaac Sim。"},
-    {"key": "fix_base", "label": "固定 base", "type": "bool", "default": false, "help": "檢查關節時先固定 base 比較方便；訓練時要關掉。"},
-    {"key": "merge_fixed_joints", "label": "合併 fixed joints", "type": "bool", "default": true,
-     "help": "3.0 以 URDF XML 前處理實作；Q1 Leg 的 6 個鎖定關節會被合併進父 link。"},
-    {"key": "stiffness", "label": "預設 drive stiffness", "type": "float", "default": 80.0, "min": 0, "max": 1000, "step": 5},
-    {"key": "damping", "label": "預設 drive damping", "type": "float", "default": 4.0, "min": 0, "max": 100, "step": 0.5},
-    {"key": "link_density", "label": "缺少慣量時的 link 密度（kg/m³）", "type": "float", "default": 0.0, "min": 0, "max": 5000, "step": 50,
-     "help": "0 表示用 URDF 既有 inertial；Q1 URDF 已含 inertial，通常不用改。"},
-    {"key": "num_envs", "label": "平行環境數", "type": "int", "default": 4, "min": 1, "max": 1024}
+    {
+      "key": "physics",
+      "label": "物理 preset",
+      "type": "select",
+      "default": "newton_mjwarp",
+      "options": [
+        "newton_mjwarp",
+        "isaacsim_physx"
+      ],
+      "help": "newton_mjwarp：kitless，用 UrdfFileCfg（預設）。isaacsim_physx：顯式 UrdfConverter→USD，需要完整 Isaac Sim。",
+      "label_en": "Physics preset",
+      "help_en": "newton_mjwarp: kitless UrdfFileCfg (default). isaacsim_physx: explicit UrdfConverter→USD; needs full Isaac Sim."
+    },
+    {
+      "key": "fix_base",
+      "label": "固定 base",
+      "type": "bool",
+      "default": false,
+      "help": "檢查關節時先固定 base 比較方便；訓練時要關掉。",
+      "label_en": "Fix base",
+      "help_en": "Fixing the base makes joint inspection easier; turn off for training."
+    },
+    {
+      "key": "merge_fixed_joints",
+      "label": "合併 fixed joints",
+      "type": "bool",
+      "default": true,
+      "help": "3.0 以 URDF XML 前處理實作；Q1 Leg 的 6 個鎖定關節會被合併進父 link。",
+      "label_en": "Merge fixed joints",
+      "help_en": "Implemented as URDF XML preprocessing in 3.0; Q1 Leg’s six locked joints merge into parent links."
+    },
+    {
+      "key": "stiffness",
+      "label": "預設 drive stiffness",
+      "type": "float",
+      "default": 80.0,
+      "min": 0,
+      "max": 1000,
+      "step": 5,
+      "label_en": "Default drive stiffness",
+      "help_en": ""
+    },
+    {
+      "key": "damping",
+      "label": "預設 drive damping",
+      "type": "float",
+      "default": 4.0,
+      "min": 0,
+      "max": 100,
+      "step": 0.5,
+      "label_en": "Default drive damping",
+      "help_en": ""
+    },
+    {
+      "key": "link_density",
+      "label": "缺少慣量時的 link 密度（kg/m³）",
+      "type": "float",
+      "default": 0.0,
+      "min": 0,
+      "max": 5000,
+      "step": 50,
+      "help": "0 表示用 URDF 既有 inertial；Q1 URDF 已含 inertial，通常不用改。",
+      "label_en": "Link density when inertia missing (kg/m³)",
+      "help_en": "0 uses existing URDF inertial; Q1 URDF already has inertial data."
+    },
+    {
+      "key": "num_envs",
+      "label": "平行環境數",
+      "type": "int",
+      "default": 4,
+      "min": 1,
+      "max": 1024,
+      "label_en": "Parallel env count",
+      "help_en": ""
+    }
   ],
   "references": [
-    {"type": "docs", "title": "Migrating To 3.0 — URDF Importer", "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/migrating.html"},
-    {"type": "docs", "title": "Isaac Lab how-to: Importing a New Asset (URDF)", "url": "https://isaac-sim.github.io/IsaacLab/main/source/how-to/import_new_asset.html"},
-    {"type": "github", "title": "Q1 Leg URDF（store snapshot）", "url": "https://github.com/willnien10005914/q1_store_urdf/tree/main/assets/robots/leg/urdf/q1_inertia"},
-    {"type": "github", "title": "Q1 Wheel URDF（store snapshot）", "url": "https://github.com/willnien10005914/q1_store_urdf/tree/main/assets/robots/wheel/urdf/q1_inertia"}
+    {
+      "type": "docs",
+      "title": "Migrating To 3.0 — URDF Importer",
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/migrating.html"
+    },
+    {
+      "type": "docs",
+      "title": "Isaac Lab how-to: Importing a New Asset (URDF)",
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/how-to/import_new_asset.html"
+    },
+    {
+      "type": "github",
+      "title": "Q1 Leg URDF（store snapshot）",
+      "url": "https://github.com/willnien10005914/q1_store_urdf/tree/main/assets/robots/leg/urdf/q1_inertia"
+    },
+    {
+      "type": "github",
+      "title": "Q1 Wheel URDF（store snapshot）",
+      "url": "https://github.com/willnien10005914/q1_store_urdf/tree/main/assets/robots/wheel/urdf/q1_inertia"
+    }
   ],
   "quiz": [
-    {"id": "q1", "question": "3.0 的 UrdfConverterCfg 中哪個設定仍然支援？",
-     "choices": ["convert_mimic_joints_to_normal_joints", "replace_cylinders_with_capsules", "merge_fixed_joints", "root_link_name"],
-     "answer": 2, "explain": "另外三個在新 importer 不支援（會警告）；merge_fixed_joints 改以 XML 前處理實作。"},
-    {"id": "q2", "question": "3.0 轉出來的 USD 檔名怎麼決定？",
-     "choices": ["usd_file_name 參數", "由 importer 依 robot name 自動決定：{usd_dir}/{robot_name}/{robot_name}.usda", "固定叫 robot.usd", "由 --output 旗標"],
-     "answer": 1, "explain": "usd_file_name 不能再覆寫；make_instanceable 也不再支援（預設即 instanceable）。"},
-    {"id": "q3", "question": "NaturalFrequencyGainsCfg 在 3.0 的狀態是？",
-     "choices": ["推薦使用", "deprecated；改用 PDGainsCfg 直接給 stiffness/damping", "改名 ResonanceGainsCfg", "只對 wheel 有效"],
-     "answer": 1, "explain": "compute_natural_stiffness 已從 importer 移除；用 PDGainsCfg（stiffness=None 表示沿用 URDF 值）。"},
-    {"id": "q4", "question": "Q1 Wheel URDF 的 knee/finger mimic 關節在 3.0 要怎麼處理？",
-     "choices": ["用 convert_mimic_joints_to_normal_joints 轉掉", "importer 保留 mimic；PPO 的 23 個控制軸不應包含 mimic 從屬關節，依 manifest 的 control_joints 選 joint_names_expr", "全部當作獨立致動器", "刪掉 mimic 標籤"],
-     "answer": 1, "explain": "mimic 從屬關節不是控制通道；本站 manifest 的 control_joints 記錄 23 軸順序，ActuatorCfg 的 joint_names_expr 只列這些。"}
+    {
+      "id": "q1",
+      "question": "3.0 的 UrdfConverterCfg 中哪個設定仍然支援？",
+      "choices": [
+        "convert_mimic_joints_to_normal_joints",
+        "replace_cylinders_with_capsules",
+        "merge_fixed_joints",
+        "root_link_name"
+      ],
+      "answer": 2,
+      "explain": "另外三個在新 importer 不支援（會警告）；merge_fixed_joints 改以 XML 前處理實作。",
+      "question_en": "Which UrdfConverterCfg option is still supported in 3.0?",
+      "choices_en": [
+        "convert_mimic_joints_to_normal_joints",
+        "replace_cylinders_with_capsules",
+        "merge_fixed_joints",
+        "root_link_name"
+      ],
+      "explain_en": "The other three are unsupported in the new importer (warnings); merge_fixed_joints is done via XML preprocessing."
+    },
+    {
+      "id": "q2",
+      "question": "3.0 轉出來的 USD 檔名怎麼決定？",
+      "choices": [
+        "usd_file_name 參數",
+        "由 importer 依 robot name 自動決定：{usd_dir}/{robot_name}/{robot_name}.usda",
+        "固定叫 robot.usd",
+        "由 --output 旗標"
+      ],
+      "answer": 1,
+      "explain": "usd_file_name 不能再覆寫；make_instanceable 也不再支援（預設即 instanceable）。",
+      "question_en": "How is the output USD path chosen in 3.0?",
+      "choices_en": [
+        "usd_file_name parameter",
+        "Auto: {usd_dir}/{robot_name}/{robot_name}.usda",
+        "Always robot.usd",
+        "--output flag"
+      ],
+      "explain_en": "usd_file_name can no longer override; make_instanceable is ignored (instanceable by default)."
+    },
+    {
+      "id": "q3",
+      "question": "NaturalFrequencyGainsCfg 在 3.0 的狀態是？",
+      "choices": [
+        "推薦使用",
+        "deprecated；改用 PDGainsCfg 直接給 stiffness/damping",
+        "改名 ResonanceGainsCfg",
+        "只對 wheel 有效"
+      ],
+      "answer": 1,
+      "explain": "compute_natural_stiffness 已從 importer 移除；用 PDGainsCfg（stiffness=None 表示沿用 URDF 值）。",
+      "question_en": "What is the status of NaturalFrequencyGainsCfg in 3.0?",
+      "choices_en": [
+        "Recommended",
+        "Deprecated; use PDGainsCfg with stiffness/damping directly",
+        "Renamed to ResonanceGainsCfg",
+        "Wheel-only"
+      ],
+      "explain_en": "compute_natural_stiffness was removed from the importer; use PDGainsCfg (stiffness=None keeps URDF values)."
+    },
+    {
+      "id": "q4",
+      "question": "Q1 Wheel URDF 的 knee/finger mimic 關節在 3.0 要怎麼處理？",
+      "choices": [
+        "用 convert_mimic_joints_to_normal_joints 轉掉",
+        "importer 保留 mimic；PPO 的 23 個控制軸不應包含 mimic 從屬關節，依 manifest 的 control_joints 選 joint_names_expr",
+        "全部當作獨立致動器",
+        "刪掉 mimic 標籤"
+      ],
+      "answer": 1,
+      "explain": "mimic 從屬關節不是控制通道；本站 manifest 的 control_joints 記錄 23 軸順序，ActuatorCfg 的 joint_names_expr 只列這些。",
+      "question_en": "How should Q1 Wheel knee/finger mimic joints be handled in 3.0?",
+      "choices_en": [
+        "Use convert_mimic_joints_to_normal_joints",
+        "Importer keeps mimic; PPO’s 23 control axes must exclude mimic slaves—use manifest control_joints in joint_names_expr",
+        "Treat all as independent actuators",
+        "Delete mimic tags"
+      ],
+      "explain_en": "Mimic slaves are not control channels; manifest control_joints defines the 23-axis order; ActuatorCfg joint_names_expr lists only those."
+    }
   ],
-  "run": {"kind": "isaac_v3", "trainable": false, "estimated_minutes": 3,
-          "note": "轉換 URDF → USD 並生成 Articulation，輸出關節／限位／質量表到 result.json。"}
+  "run": {
+    "kind": "isaac_v3",
+    "trainable": false,
+    "estimated_minutes": 3,
+    "note": "轉換 URDF → USD 並生成 Articulation，輸出關節／限位／質量表到 result.json。",
+    "note_en": "Converts URDF→USD, spawns Articulation, writes joint/limit/mass table to result.json."
+  }
 }

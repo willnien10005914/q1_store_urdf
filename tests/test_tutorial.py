@@ -58,6 +58,25 @@ class TutorialUnitTests(unittest.TestCase):
         self.assertEqual(progress["in_progress"], 1)
         self.assertEqual(progress["level"]["id"], "novice")
 
+    def test_lesson_bilingual_payload(self):
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg")
+        self.assertTrue(lesson.get("title_en"))
+        self.assertTrue(lesson.get("markdown"))
+        self.assertTrue(lesson.get("markdown_en"))
+        self.assertIn("Isaac Lab 3.0 architecture overview", lesson["markdown_en"].splitlines()[0])
+        self.assertNotIn("answer", lesson["quiz"][0])
+        self.assertNotIn("explain", lesson["quiz"][0])
+        self.assertTrue(lesson["quiz"][0].get("question_en"))
+        self.assertEqual(len(lesson["quiz"][0]["choices"]), len(lesson["quiz"][0]["choices_en"]))
+        self.assertTrue(lesson["params"][0].get("label_en"))
+        graded = self.t.grade_quiz(
+            self.t.register_user("Locale-Check")["user"]["id"],
+            "l01-isaaclab3-overview",
+            {q["id"]: q["answer"] for q in self.t.lesson_meta("l01-isaaclab3-overview")["quiz"]},
+        )
+        self.assertEqual(graded["score"], 100)
+        self.assertTrue(graded["results"][0].get("explain_en") or graded["results"][0].get("explain"))
+
     def test_quiz_grading_and_level(self):
         uid = self.t.register_user("Bob")["user"]["id"]
         meta = self.t.lesson_meta("l03-migrating-2x-to-3")

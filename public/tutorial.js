@@ -187,26 +187,17 @@ function syncLayoutBar() {
   bar.querySelectorAll('[data-layout]').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.layout === state.layoutPreset);
   });
-  const en = getLocale() === 'en';
   const sideBtn = $('toggle-side');
   if (sideBtn) {
-    sideBtn.textContent = state.sideCollapsed
-      ? (en ? 'Show left' : '展開左欄')
-      : (en ? 'Hide left' : '收合左欄');
-    sideBtn.title = state.sideCollapsed
-      ? (en ? 'Show the lesson sidebar' : '展開左側課程欄')
-      : (en ? 'Hide the lesson sidebar' : '收合左側課程欄');
+    sideBtn.textContent = state.sideCollapsed ? t('school_layout_expand_side') : t('school_layout_collapse_side');
+    sideBtn.title = sideBtn.textContent;
     sideBtn.setAttribute('aria-pressed', state.sideCollapsed ? 'true' : 'false');
     sideBtn.classList.toggle('is-active', !!state.sideCollapsed);
   }
   const agentBtn = $('toggle-agent');
   if (agentBtn) {
-    agentBtn.textContent = state.agentCollapsed
-      ? (en ? 'Show right' : '展開右欄')
-      : (en ? 'Hide right' : '收合右欄');
-    agentBtn.title = state.agentCollapsed
-      ? (en ? 'Show the Hermes panel' : '展開右側 Hermes')
-      : (en ? 'Hide the Hermes panel' : '收合右側 Hermes');
+    agentBtn.textContent = state.agentCollapsed ? t('school_layout_expand_agent') : t('school_layout_collapse_agent');
+    agentBtn.title = agentBtn.textContent;
     agentBtn.setAttribute('aria-pressed', state.agentCollapsed ? 'true' : 'false');
     agentBtn.classList.toggle('is-active', !!state.agentCollapsed);
   }
@@ -677,13 +668,36 @@ function wireCodeEditor() {
 }
 
 function localeTitle(obj) {
-  return getLocale() === 'en' ? (obj.title_en || obj.title) : (obj.title || obj.title_en);
+  return L(obj, 'title') || '';
 }
 function localeSummary(obj) {
-  return getLocale() === 'en' ? (obj.summary_en || obj.summary) : (obj.summary || obj.summary_en);
+  return L(obj, 'summary') || '';
 }
 function localeLabel(obj) {
-  return getLocale() === 'en' ? (obj.label_en || obj.label) : (obj.label || obj.label_en);
+  return L(obj, 'label') || '';
+}
+function localeHelp(obj) {
+  return L(obj, 'help') || '';
+}
+function localeMarkdown(lesson) {
+  if (!lesson) return '';
+  if (getLocale() === 'en') return lesson.markdown_en || lesson.markdown || '';
+  return lesson.markdown || lesson.markdown_en || '';
+}
+function localeQuizQuestion(q) {
+  return L(q, 'question') || '';
+}
+function localeQuizChoices(q) {
+  if (getLocale() === 'en' && Array.isArray(q.choices_en) && q.choices_en.length) return q.choices_en;
+  return q.choices || [];
+}
+function localeExplain(row) {
+  return L(row, 'explain') || '';
+}
+function applySchoolChrome() {
+  applyI18n();
+  document.title = t('school_doc_title');
+  syncLayoutChrome();
 }
 
 function loadUser() {
@@ -917,7 +931,7 @@ async function openLesson(id) {
   $('lesson-summary').textContent = localeSummary(lesson);
   $('lesson-runtime').textContent = lesson.runtime?.label || '';
   $('lesson-minutes').textContent = (lesson.minutes || '?') + ' min';
-  $('lesson-md').innerHTML = renderMarkdown(lesson.markdown || '');
+  $('lesson-md').innerHTML = renderMarkdown(localeMarkdown(lesson));
   state.codeWide = false;
   state.codeFocus = false;
   // Hardware / explode studio needs space — collapse example.py by default on l09.
@@ -973,24 +987,27 @@ function renderParams(lesson) {
   const last = lesson.last_params || {};
   box.innerHTML = (lesson.params || []).map((p) => {
     const val = last[p.key] ?? p.default;
+    const label = escapeHtml(localeLabel(p) || p.key);
+    const help = localeHelp(p);
+    const helpHtml = help ? `<small>${escapeHtml(help)}</small>` : '';
     if (p.type === 'select') {
-      return `<div class="tut-param"><label><span>${escapeHtml(p.label)}</span></label>
+      return `<div class="tut-param"><label><span>${label}</span></label>
         <select data-param="${p.key}">${(p.options||[]).map((o) => `<option value="${escapeHtml(o)}" ${o===val?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
-        ${p.help ? `<small>${escapeHtml(p.help)}</small>` : ''}</div>`;
+        ${helpHtml}</div>`;
     }
     if (p.type === 'bool') {
-      return `<div class="tut-param"><label><span>${escapeHtml(p.label)}</span>
+      return `<div class="tut-param"><label><span>${label}</span>
         <input type="checkbox" data-param="${p.key}" ${val ? 'checked' : ''}></label>
-        ${p.help ? `<small>${escapeHtml(p.help)}</small>` : ''}</div>`;
+        ${helpHtml}</div>`;
     }
     if (p.type === 'int' || p.type === 'float') {
-      return `<div class="tut-param"><label><span>${escapeHtml(p.label)}</span><output data-out="${p.key}">${val}</output></label>
+      return `<div class="tut-param"><label><span>${label}</span><output data-out="${p.key}">${val}</output></label>
         <input type="range" data-param="${p.key}" min="${p.min??0}" max="${p.max??100}" step="${p.step??(p.type==='int'?1:0.1)}" value="${val}">
-        ${p.help ? `<small>${escapeHtml(p.help)}</small>` : ''}</div>`;
+        ${helpHtml}</div>`;
     }
-    return `<div class="tut-param"><label><span>${escapeHtml(p.label)}</span></label>
+    return `<div class="tut-param"><label><span>${label}</span></label>
       <input type="text" data-param="${p.key}" value="${escapeHtml(val??'')}">
-      ${p.help ? `<small>${escapeHtml(p.help)}</small>` : ''}</div>`;
+      ${helpHtml}</div>`;
   }).join('');
   box.querySelectorAll('input[type=range]').forEach((el) => el.addEventListener('input', () => {
     const out = box.querySelector(`[data-out="${el.dataset.param}"]`);
@@ -1012,10 +1029,10 @@ function collectParams() {
 function renderQuiz(lesson) {
   const box = $('quiz');
   $('quiz-result').textContent = '';
-  if (!lesson.quiz?.length) { box.innerHTML = '<p class="tut-empty">這堂課沒有測驗。</p>'; return; }
+  if (!lesson.quiz?.length) { box.innerHTML = `<p class="tut-empty">${escapeHtml(t('school_quiz_empty'))}</p>`; return; }
   box.innerHTML = lesson.quiz.map((q, i) => `<div class="q" data-qid="${q.id}">
-    <strong>${i + 1}. ${escapeHtml(q.question)}</strong>
-    ${(q.choices||[]).map((c, j) => `<label><input type="radio" name="${q.id}" value="${j}"> <span>${escapeHtml(c)}</span></label>`).join('')}
+    <strong>${i + 1}. ${escapeHtml(localeQuizQuestion(q))}</strong>
+    ${localeQuizChoices(q).map((c, j) => `<label><input type="radio" name="${q.id}" value="${j}"> <span>${escapeHtml(c)}</span></label>`).join('')}
   </div>`).join('');
 }
 
@@ -1643,16 +1660,20 @@ async function sendChat() {
 
 function wire() {
   initI18n();
+  applySchoolChrome();
   document.querySelectorAll('.lang-switch [data-lang]').forEach((b) => b.addEventListener('click', () => {
     setLocale(b.dataset.lang);
-    applyI18n();
+    applySchoolChrome();
     document.querySelectorAll('.lang-switch [data-lang]').forEach((x) => {
       const on = x.dataset.lang === getLocale();
       x.classList.toggle('active', on);
       x.setAttribute('aria-pressed', on);
     });
+    updateDiscovery();
     if (state.lesson) openLesson(state.lessonId);
     else { renderSidebar(); renderUser(); }
+    refreshLlm().catch(() => {});
+    updateTicker();
   }));
 
   document.querySelectorAll('.tut-side [data-robot]').forEach((b) => b.addEventListener('click', () => setRobot(b.dataset.robot)));
@@ -1744,7 +1765,7 @@ function wire() {
       q.classList.toggle('bad', !r.correct);
       let ex = q.querySelector('.explain');
       if (!ex) { ex = document.createElement('div'); ex.className = 'explain'; q.appendChild(ex); }
-      ex.textContent = r.explain || '';
+      ex.textContent = localeExplain(r);
     });
   });
 

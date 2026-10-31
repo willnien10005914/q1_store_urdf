@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Isaac Lab 3 Tutorial — Q1 Store</title>
+<title>Q1 學院 — Q1 Store</title>
 <meta name="description" content="學習 Isaac Lab 3.0 API：多後端物理、URDF、致動器、RSL-RL PPO、錄影與部署。本機 Hermes 助教可對話與改 example.py。">
 <meta name="theme-color" content="#f5f5f7">
 <link rel="stylesheet" href="/style.css">
@@ -32,7 +32,7 @@
 </header>
 <div class="tut-ticker" id="ticker" aria-live="polite">
   <span class="label">Hermes</span>
-  <div class="track"><div class="scroll" id="ticker-scroll"><span>啟用「搜尋進修課程」後，這裡會出現新的 Isaac Lab 3 素材建議。</span></div></div>
+  <div class="track"><div class="scroll" id="ticker-scroll"><span data-i18n="school_ticker_empty">啟用「搜尋進修課程」後，這裡會出現新的素材建議。</span></div></div>
   <span class="count" id="ticker-count" hidden>0 pending</span>
 </div>
 
@@ -40,28 +40,28 @@
   <div class="tut-top">
     <div>
       <p class="eyebrow">ISAAC LAB 3.0 · Q1 TUTORIAL</p>
-      <h1 id="page-title">學著改 API，不是只按按鈕。</h1>
-      <p id="page-lead">每個課程都有可改的 example.py、參數滑桿、測驗，以及本機 Hermes 助教。訓練寫入 progress.json／latest.pt，Pinggy 斷線後可續訓。</p>
+      <h1 id="page-title" data-i18n="school_page_title">學著改 API，不是只按按鈕。</h1>
+      <p id="page-lead" data-i18n="school_page_lead">每個課程都有可改的 example.py、參數滑桿、測驗，以及本機 Hermes 助教。訓練寫入 progress.json／latest.pt，Pinggy 斷線後可續訓。</p>
     </div>
     <div class="tut-user" id="user-box">
-      <input id="user-name" maxlength="40" placeholder="你的名字" aria-label="註冊名字">
-      <button type="button" class="button primary" id="user-register">進入</button>
+      <input id="user-name" maxlength="40" data-i18n-placeholder="school_name_ph" data-i18n-aria="school_name_ph" placeholder="你的名字" aria-label="你的名字">
+      <button type="button" class="button primary" id="user-register" data-i18n="school_enter">進入</button>
       <span class="level" id="user-level" hidden></span>
       <div class="tut-progress-bar" id="user-bar" hidden title="完成百分比"><i></i></div>
     </div>
   </div>
 
   <div class="tut-layout-bar" id="layout-bar" role="toolbar" aria-label="版面調整">
-    <span class="tut-layout-bar-label">三欄版面</span>
-    <button type="button" class="text-link" data-layout="default" title="還原預設寬度">預設</button>
-    <button type="button" class="text-link" data-layout="equal" title="左／中／右平均寬度">平均</button>
-    <button type="button" class="text-link" data-layout="expand-side" title="加寬左側課程欄">加寬左欄</button>
-    <button type="button" class="text-link" data-layout="expand-main" title="加寬中間課程區">加寬中欄</button>
-    <button type="button" class="text-link" data-layout="expand-agent" title="加寬右側 Hermes">加寬右欄</button>
+    <span class="tut-layout-bar-label" data-i18n="school_layout_label">三欄版面</span>
+    <button type="button" class="text-link" data-layout="default" data-i18n="school_layout_default" data-i18n-title="school_layout_default" title="預設">預設</button>
+    <button type="button" class="text-link" data-layout="equal" data-i18n="school_layout_equal" data-i18n-title="school_layout_equal" title="平均">平均</button>
+    <button type="button" class="text-link" data-layout="expand-side" data-i18n="school_layout_widen_side" data-i18n-title="school_layout_widen_side" title="加寬左欄">加寬左欄</button>
+    <button type="button" class="text-link" data-layout="expand-main" data-i18n="school_layout_widen_main" data-i18n-title="school_layout_widen_main" title="加寬中欄">加寬中欄</button>
+    <button type="button" class="text-link" data-layout="expand-agent" data-i18n="school_layout_widen_agent" data-i18n-title="school_layout_widen_agent" title="加寬右欄">加寬右欄</button>
     <span class="tut-layout-bar-sep" aria-hidden="true"></span>
-    <button type="button" class="text-link" id="toggle-side" data-pane-toggle="side" title="收合或展開左側課程欄" aria-pressed="false">收合左欄</button>
-    <button type="button" class="text-link" id="toggle-agent" data-pane-toggle="agent" title="收合或展開右側 Hermes" aria-pressed="false">收合右欄</button>
-    <span class="tut-layout-bar-hint">也可拖左右邊緣；雙擊把手可加寬該欄</span>
+    <button type="button" class="text-link" id="toggle-side" data-pane-toggle="side" data-i18n="school_layout_collapse_side" title="收合或展開左側課程欄" aria-pressed="false">收合左欄</button>
+    <button type="button" class="text-link" id="toggle-agent" data-pane-toggle="agent" data-i18n="school_layout_collapse_agent" title="收合或展開右側 Hermes" aria-pressed="false">收合右欄</button>
+    <span class="tut-layout-bar-hint" data-i18n="school_layout_hint">也可拖左右邊緣；雙擊把手可加寬該欄</span>
   </div>
 
   <div class="tut-layout-wrap">
@@ -69,46 +69,46 @@
   <div class="tut-layout">
     <aside class="tut-side" id="sidebar">
       <div class="tut-pane-resize tut-pane-resize-end" id="resize-side" role="separator" aria-orientation="vertical" aria-label="調整左側欄寬度" title="拖曳調整左側欄寬度"></div>
-      <div class="robot-toggle" role="group" aria-label="機型">
-        <button type="button" data-robot="leg" class="active" aria-pressed="true">雙足</button>
-        <button type="button" data-robot="wheel" aria-pressed="false">雙輪</button>
+      <div class="robot-toggle" role="group" data-i18n-aria="school_robot" aria-label="機型">
+        <button type="button" data-robot="leg" class="active" aria-pressed="true" data-i18n="school_robot_leg">雙足</button>
+        <button type="button" data-robot="wheel" aria-pressed="false" data-i18n="school_robot_wheel">雙輪</button>
       </div>
       <details class="tut-fold" data-fold="lessons" open>
-        <summary>課程</summary>
-        <div class="tut-fold-body" id="lesson-nav"><p class="tut-empty">載入課程中…</p></div>
+        <summary data-i18n="school_fold_lessons">課程</summary>
+        <div class="tut-fold-body" id="lesson-nav"><p class="tut-empty" data-i18n="school_lessons_loading">載入課程中…</p></div>
       </details>
       <details class="tut-fold" data-fold="runs" open>
-        <summary>我的訓練</summary>
-        <div class="tut-fold-body" id="my-runs"><p class="tut-empty" style="padding:12px;font-size:11px">完成執行後會列在這裡。</p></div>
+        <summary data-i18n="school_fold_runs">我的訓練</summary>
+        <div class="tut-fold-body" id="my-runs"><p class="tut-empty" style="padding:12px;font-size:11px" data-i18n="school_runs_empty">完成執行後會列在這裡。</p></div>
       </details>
       <details class="tut-fold" data-fold="proposals" open>
-        <summary>進修提案</summary>
+        <summary data-i18n="school_fold_proposals">進修提案</summary>
         <div class="tut-fold-body tut-proposals" id="proposals-box"></div>
       </details>
       <details class="tut-fold" data-fold="llm" open>
-        <summary>本機 LLM（Hermes）</summary>
+        <summary data-i18n="school_fold_llm">本機 LLM（Hermes）</summary>
         <div class="tut-fold-body tut-llm" id="llm-box">
           <p id="llm-status" style="font-size:11px;color:#8a8a92;margin:0 0 8px">偵測中…</p>
           <ol id="llm-howto" style="margin:0 0 10px;padding-left:18px;font-size:10.5px;line-height:1.55;color:#555"></ol>
           <div id="llm-models"></div>
           <div class="tut-actions" style="margin-top:8px">
-            <button type="button" class="button secondary" id="llm-refresh" style="font-size:11px;min-height:32px;padding:6px 12px">重新偵測</button>
-            <button type="button" class="button secondary" id="llm-stop" style="font-size:11px;min-height:32px;padding:6px 12px" hidden>停止伺服器</button>
+            <button type="button" class="button secondary" id="llm-refresh" style="font-size:11px;min-height:32px;padding:6px 12px" data-i18n="school_llm_refresh">重新偵測</button>
+            <button type="button" class="button secondary" id="llm-stop" style="font-size:11px;min-height:32px;padding:6px 12px" hidden data-i18n="school_llm_stop">停止伺服器</button>
           </div>
         </div>
       </details>
       <details class="tut-fold" data-fold="discovery" open>
-        <summary>進修掃描</summary>
+        <summary data-i18n="school_fold_discovery">進修掃描</summary>
         <div class="tut-fold-body tut-discovery">
-          <label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="discovery-toggle"> Hermes 搜尋進修課程</label>
-          <p id="discovery-meta" style="color:#8a8a92;margin:8px 0 0;line-height:1.55">勾選後會定期上網找 Isaac Lab 3 文件／arXiv／YouTube；新素材會進「待審提案」並出現在上排走馬燈。不必等 Hermes LLM 上線也能掃描。</p>
-          <button type="button" class="text-link" id="discovery-now" style="margin-top:8px;font-size:11px">立刻掃描一次</button>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="discovery-toggle"> <span data-i18n="school_discovery_toggle">Hermes 搜尋進修課程</span></label>
+          <p id="discovery-meta" style="color:#8a8a92;margin:8px 0 0;line-height:1.55" data-i18n="school_discovery_meta">勾選後會定期上網找 Isaac Lab 3 文件／arXiv／YouTube；新素材會進「待審提案」並出現在上排走馬燈。不必等 Hermes LLM 上線也能掃描。</p>
+          <button type="button" class="text-link" id="discovery-now" style="margin-top:8px;font-size:11px" data-i18n="school_discovery_now">立刻掃描一次</button>
         </div>
       </details>
     </aside>
 
     <section class="tut-main" id="main">
-      <div class="tut-empty" id="welcome">選左側課程開始。第一次請先註冊名字，進度會綁在這個名字上。</div>
+      <div class="tut-empty" id="welcome" data-i18n="school_welcome">選左側課程開始。第一次請先註冊名字，進度會綁在這個名字上。</div>
       <div id="lesson-view" hidden>
         <div class="tut-main-head">
           <div>
@@ -122,10 +122,10 @@
           </div>
         </div>
         <div class="tut-tabs" role="tablist">
-          <button type="button" data-tab="read" class="active">課文</button>
-          <button type="button" data-tab="lab">練習與執行</button>
-          <button type="button" data-tab="quiz">測驗</button>
-          <button type="button" data-tab="refs">參考</button>
+          <button type="button" data-tab="read" class="active" data-i18n="school_tab_read">課文</button>
+          <button type="button" data-tab="lab" data-i18n="school_tab_lab">練習與執行</button>
+          <button type="button" data-tab="quiz" data-i18n="school_tab_quiz">測驗</button>
+          <button type="button" data-tab="refs" data-i18n="school_tab_refs">參考</button>
         </div>
         <div class="tut-pane active" data-pane="read"><div class="tut-md" id="lesson-md"></div></div>
         <div class="tut-pane" data-pane="lab">
@@ -135,13 +135,13 @@
                 <strong>example.py</strong>
                 <span class="tut-code-legend" title="底線／底色標示來源">
                   <i class="mark hermes"></i> Hermes
-                  <i class="mark manual"></i> 手動
+                  <i class="mark manual"></i> <span data-i18n="school_code_manual">手動</span>
                 </span>
                 <button type="button" class="text-link" id="code-collapse" aria-pressed="false" title="收合 example.py，放大練習／硬體工作室">收合程式</button>
                 <button type="button" class="text-link" id="code-widen" aria-pressed="false" title="加寬 example.py（保留左右欄）">加寬程式區</button>
                 <button type="button" class="text-link" id="code-focus" aria-pressed="false" title="收合左右欄，程式區佔滿畫面">專注</button>
-                <button type="button" class="text-link" id="code-reset">還原原文</button>
-                <button type="button" class="text-link" id="code-save">存草稿</button>
+                <button type="button" class="text-link" id="code-reset" data-i18n="school_code_reset">還原原文</button>
+                <button type="button" class="text-link" id="code-save" data-i18n="school_code_save">存草稿</button>
               </div>
               <div class="tut-code-editor solarized-lite" id="code-editor">
                 <pre class="tut-code-gutter" id="code-gutter" aria-hidden="true">1</pre>
@@ -151,15 +151,15 @@
                 </div>
               </div>
               <div class="tut-code-resize" id="code-resize" role="separator" aria-orientation="vertical" aria-label="調整程式碼寬度" title="拖曳調整寬度"></div>
-              <p class="tut-code-hint" id="code-hint">行號左側；黃底＝Hermes、藍底線＝你的修改。變更會自動加註解，按「執行」驗證。</p>
+              <p class="tut-code-hint" id="code-hint" data-i18n="school_code_hint">行號左側；黃底＝Hermes、藍底線＝你的修改。變更會自動加註解，按「執行」驗證。</p>
             </div>
             <div>
               <div id="hardware-studio" class="hw-studio-host" hidden></div>
               <div class="tut-params" id="params"></div>
               <div class="tut-actions">
-                <button type="button" class="button primary" id="run-btn">執行</button>
-                <button type="button" class="button secondary" id="cancel-btn" hidden>取消</button>
-                <button type="button" class="button secondary" id="resume-btn" hidden>續訓</button>
+                <button type="button" class="button primary" id="run-btn" data-i18n="school_run">執行</button>
+                <button type="button" class="button secondary" id="cancel-btn" hidden data-i18n="school_cancel">取消</button>
+                <button type="button" class="button secondary" id="resume-btn" hidden data-i18n="school_resume">續訓</button>
               </div>
               <div class="tut-run-status" id="run-status" hidden></div>
               <div class="tut-run-media" id="run-media"></div>
@@ -168,7 +168,7 @@
         </div>
         <div class="tut-pane" data-pane="quiz">
           <div class="tut-quiz" id="quiz"></div>
-          <div class="tut-actions"><button type="button" class="button primary" id="quiz-submit">送出測驗</button></div>
+          <div class="tut-actions"><button type="button" class="button primary" id="quiz-submit" data-i18n="school_quiz_submit">送出測驗</button></div>
           <div id="quiz-result" style="margin-top:12px;font-size:12px"></div>
         </div>
         <div class="tut-pane" data-pane="refs"><ul class="tut-refs" id="refs"></ul></div>
@@ -178,17 +178,17 @@
     <aside class="tut-agent" id="agent">
       <div class="tut-pane-resize tut-pane-resize-start" id="resize-agent" role="separator" aria-orientation="vertical" aria-label="調整右側欄寬度" title="拖曳調整右側欄寬度"></div>
       <div class="tut-agent-head">
-        <strong>Hermes 助教</strong>
-        <span class="pill" id="agent-mode">離線</span>
+        <strong data-i18n="school_agent_title">Hermes 助教</strong>
+        <span class="pill" id="agent-mode" data-i18n="school_agent_offline">離線</span>
       </div>
       <div class="tut-chat" id="chat"></div>
       <div class="tut-compose">
-        <textarea id="chat-input" placeholder="問這堂課的 API、請 Hermes 改參數或執行 /help" rows="3"></textarea>
+        <textarea id="chat-input" data-i18n-placeholder="school_chat_ph" placeholder="問這堂課的 API、請 Hermes 改參數或執行 /help" rows="3"></textarea>
         <div class="row">
-          <button type="button" class="button primary" id="chat-send" style="min-height:36px;padding:8px 16px">送出</button>
-          <button type="button" class="text-link" id="chat-clear">清除對話</button>
+          <button type="button" class="button primary" id="chat-send" style="min-height:36px;padding:8px 16px" data-i18n="school_chat_send">送出</button>
+          <button type="button" class="text-link" id="chat-clear" data-i18n="school_chat_clear">清除對話</button>
         </div>
-        <p class="hint">指令：/search /arxiv /youtube /fetch /params /run /code /edit /analyze /propose /remember /help。說「改 coding／改 example.py／加上 log」都會寫入中間編輯器並標黃線／`# [Hermes]`。</p>
+        <p class="hint" data-i18n="school_chat_hint">指令：/search /arxiv /youtube /fetch /params /run /code /edit /analyze /propose /remember /help。說「改 coding／改 example.py／加上 log」都會寫入中間編輯器並標黃線／`# [Hermes]`。</p>
       </div>
     </aside>
   </div>
@@ -202,9 +202,9 @@
   <h2 id="proposal-title"></h2>
   <div class="tut-md" id="proposal-body" style="max-height:50vh;overflow:auto"></div>
   <div class="tut-actions" style="margin-top:16px">
-    <button type="button" class="button primary" id="proposal-approve">同意（待 Cursor 建立）</button>
-    <button type="button" class="button secondary" id="proposal-reject">拒絕</button>
-    <button type="button" class="button secondary" id="proposal-prompt">複製 Cursor prompt</button>
+    <button type="button" class="button primary" id="proposal-approve" data-i18n="school_proposal_approve">同意（待 Cursor 建立）</button>
+    <button type="button" class="button secondary" id="proposal-reject" data-i18n="school_proposal_reject">拒絕</button>
+    <button type="button" class="button secondary" id="proposal-prompt" data-i18n="school_proposal_prompt">複製 Cursor prompt</button>
   </div>
   <pre id="proposal-cursor" class="diff-box" hidden style="margin-top:12px"></pre>
 </dialog>
@@ -212,18 +212,18 @@
 <dialog id="diff-dialog">
   <button type="button" class="dialog-close" id="diff-close" aria-label="關閉">×</button>
   <p class="eyebrow">CODE PROPOSAL</p>
-  <h2>Hermes 建議的 example.py</h2>
+  <h2 data-i18n="school_diff_title">Hermes 建議的 example.py</h2>
   <p id="diff-explain" style="font-size:12px;color:#666;line-height:1.6"></p>
   <pre class="diff-box" id="diff-body"></pre>
   <div class="tut-actions" style="margin-top:16px">
-    <button type="button" class="button primary" id="diff-accept">採用</button>
-    <button type="button" class="button secondary" id="diff-dismiss">略過</button>
+    <button type="button" class="button primary" id="diff-accept" data-i18n="school_diff_accept">採用</button>
+    <button type="button" class="button secondary" id="diff-dismiss" data-i18n="school_diff_dismiss">略過</button>
   </div>
 </dialog>
 
 <div id="layout-restore-dock" class="tut-restore-dock" hidden>
-  <span>專注模式中 — 左右欄已收合</span>
-  <button type="button" class="button secondary" id="layout-restore">顯示左右欄</button>
+  <span data-i18n="school_focus_dock">專注模式中 — 左右欄已收合</span>
+  <button type="button" class="button secondary" id="layout-restore" data-i18n="school_focus_restore">顯示左右欄</button>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

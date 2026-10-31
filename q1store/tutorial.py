@@ -398,6 +398,8 @@ class Tutorial:
         meta = dict(self.lesson_meta(lesson_id))
         directory = self.lessons_dir / lesson_id
         meta["markdown"] = (directory / "lesson.md").read_text() if (directory / "lesson.md").is_file() else ""
+        en_md = directory / "lesson.en.md"
+        meta["markdown_en"] = en_md.read_text() if en_md.is_file() else ""
         meta["code"] = (directory / "example.py").read_text() if (directory / "example.py").is_file() else ""
         meta["robot"] = robot if robot in meta.get("robots", []) else meta.get("robots", ["leg"])[0]
         meta["robot_facts"] = self.robot_facts(meta["robot"])
@@ -418,7 +420,8 @@ class Tutorial:
                     meta["draft_code"] = row["draft_code"]
             if row and row.get("last_params"):
                 meta["last_params"] = row["last_params"]
-        meta["quiz"] = [{k: v for k, v in q.items() if k not in ("answer", "explain")} for q in meta.get("quiz", [])]
+        # Keep bilingual quiz copy for the client; answers / explanations stay server-side until graded.
+        meta["quiz"] = [{k: v for k, v in q.items() if k not in ("answer", "explain", "explain_en")} for q in meta.get("quiz", [])]
         return meta
 
     def robot_facts(self, robot):
@@ -558,7 +561,10 @@ class Tutorial:
             given = answers.get(q["id"])
             ok = isinstance(given, int) and given == q["answer"]
             correct += ok
-            results.append({"id": q["id"], "correct": ok, "given": given, "answer": q["answer"], "explain": q.get("explain", "")})
+            results.append({
+                "id": q["id"], "correct": ok, "given": given, "answer": q["answer"],
+                "explain": q.get("explain", ""), "explain_en": q.get("explain_en", ""),
+            })
         score = round(100 * correct / len(quiz))
         row = self.progress_row(uid, lesson_id)
         row["started_at"] = row["started_at"] or now_iso(self.clock())
