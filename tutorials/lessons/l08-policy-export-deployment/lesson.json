@@ -1,0 +1,47 @@
+{
+  "id": "l08-policy-export-deployment",
+  "order": 8,
+  "title": "策略匯出與部署：ONNX／TorchScript、PhysX↔Newton 轉移、Q1 部署契約",
+  "title_en": "Policy export & deployment: ONNX/TorchScript, PhysX↔Newton transfer, Q1 deploy contract",
+  "category": "deployment",
+  "level": "intermediate",
+  "minutes": 40,
+  "summary": "把 RSL-RL 的 latest.pt 匯出成 ONNX 與 TorchScript，驗證 observation 順序與正規化與訓練時一致，檢查 PhysX↔Newton 跨後端的策略差異，最後產出本站 deployments 需要的 policy bundle（policy.onnx + policy_meta.json）。",
+  "summary_en": "Export the RSL-RL latest.pt to ONNX and TorchScript, verify observation ordering/normalisation matches training, inspect PhysX↔Newton cross-backend policy drift, and build the policy bundle (policy.onnx + policy_meta.json) the store's deployments expect.",
+  "robots": ["leg", "wheel"],
+  "apis": ["OnPolicyRunner.load / get_inference_policy", "torch.onnx.export", "torch.jit.trace", "EmpiricalNormalization", "policy_meta.json 契約", "Transfer Policies Between PhysX and Newton"],
+  "params": [
+    {"key": "checkpoint", "label": "checkpoint", "type": "text", "default": "latest",
+     "help": "latest／best 或 .pt 路徑；latest 會從你在本站完成的第六課訓練中挑最新。"},
+    {"key": "export_format", "label": "匯出格式", "type": "select", "default": "onnx", "options": ["onnx", "torchscript", "both"]},
+    {"key": "opset", "label": "ONNX opset", "type": "int", "default": 17, "min": 11, "max": 20},
+    {"key": "verify_steps", "label": "數值比對步數", "type": "int", "default": 200, "min": 10, "max": 2000},
+    {"key": "tolerance", "label": "容許誤差（max abs）", "type": "float", "default": 0.0001, "min": 0.000001, "max": 0.01, "step": 0.00001},
+    {"key": "control_hz", "label": "部署控制頻率（Hz）", "type": "int", "default": 50, "min": 10, "max": 500},
+    {"key": "cross_backend_check", "label": "PhysX↔Newton 交叉驗證", "type": "bool", "default": false,
+     "help": "需要 Isaac Lab 3 + Isaac Sim；會在另一個後端跑同一策略 10 秒並回報存活率。"}
+  ],
+  "references": [
+    {"type": "docs", "title": "Isaac Lab — Transfer Policies Between PhysX and Newton", "url": "https://isaac-sim.github.io/IsaacLab/main/source/how-to/transfer_policies.html"},
+    {"type": "docs", "title": "Isaac Lab — Policy inference in USD environment", "url": "https://isaac-sim.github.io/IsaacLab/main/source/tutorials/03_envs/policy_inference_in_usd.html"},
+    {"type": "github", "title": "rsl_rl — export_policy_as_onnx", "url": "https://github.com/leggedrobotics/rsl_rl"},
+    {"type": "docs", "title": "PyTorch — torch.onnx.export", "url": "https://pytorch.org/docs/stable/onnx.html"},
+    {"type": "arxiv", "title": "Sim-to-Real: Learning Agile Locomotion For Quadruped Robots", "url": "https://arxiv.org/abs/1804.10332"}
+  ],
+  "quiz": [
+    {"id": "q1", "question": "匯出 ONNX 前最容易被忽略、卻會讓實機完全不動的東西是？",
+     "choices": ["opset 版本", "observation 的順序與 EmpiricalNormalization 統計", "檔名", "GPU 型號"],
+     "answer": 1, "explain": "RSL-RL 的 normalizer 在 actor 之前；匯出時要把它一起 trace，否則實機餵進未正規化的 obs。"},
+    {"id": "q2", "question": "在 Newton 訓練出的策略拿到 PhysX 跑，正確心態是？",
+     "choices": ["一定能用", "要重新驗證（接觸、drive 模型不同），必要時用 PhysX fine-tune", "不可能", "只要 dt 一樣就相同"],
+     "answer": 1, "explain": "官方有跨後端轉移指南，但其結論是『驗證並可能微調』，不是免費互通。"},
+    {"id": "q3", "question": "policy_meta.json 裡的 action_scale 與 default_joint_positions 用來做什麼？",
+     "choices": ["美觀", "把網路輸出轉回關節目標：target = default + scale × action", "記錄作者", "選後端"],
+     "answer": 1, "explain": "部署端不知道訓練時的 JointPositionActionCfg(scale=..., use_default_offset=True)，必須寫進 meta。"},
+    {"id": "q4", "question": "Q1 Wheel 的輪子 action 在部署時應輸出？",
+     "choices": ["位置目標", "速度目標（對應訓練時的 JointVelocityActionCfg）", "不輸出", "電流"],
+     "answer": 1, "explain": "action 語意必須與訓練一致；meta 裡用 action_kinds 標記每個關節是 position 還是 velocity。"}
+  ],
+  "run": {"kind": "any", "trainable": false, "estimated_minutes": 2,
+          "note": "匯出與數值比對只需要 torch（不需要 Isaac Lab）。沒有第六課 checkpoint 時會用一個隨機初始化的同構 actor 示範流程，result.json 會標示 demo=true。"}
+}

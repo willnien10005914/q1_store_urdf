@@ -1,0 +1,47 @@
+{
+  "id": "l02-multi-backend-physics",
+  "order": 2,
+  "title": "多後端物理：PhysX vs Newton MuJoCo Warp 的 Q1 掉落測試",
+  "title_en": "Multi-backend physics: PhysX vs Newton MuJoCo Warp drop test with Q1",
+  "category": "physics",
+  "level": "beginner",
+  "minutes": 35,
+  "summary": "同一份 Q1 場景，分別用 isaacsim_physx 與 newton_mjwarp 跑掉落／站立測試，比較落地高度、接觸力與每秒步數，並學會用 PresetCfg 讓環境支援多後端。",
+  "summary_en": "Run the same Q1 scene on isaacsim_physx and newton_mjwarp, compare settle height, contact forces and steps/s, and make an environment backend-selectable with PresetCfg.",
+  "robots": ["leg", "wheel"],
+  "apis": ["isaaclab_tasks.utils.PresetCfg", "isaaclab_physx.physics.PhysxCfg", "isaaclab_newton.physics.NewtonCfg", "SimulationCfg.dt", "ContactSensorCfg", "sensor.data.net_normal_forces_w.torch"],
+  "params": [
+    {"key": "physics", "label": "物理 preset", "type": "select", "default": "newton_mjwarp", "options": ["newton_mjwarp", "isaacsim_physx"],
+     "help": "跑兩次，一次選 Newton、一次選 PhysX，再比較 result.json。"},
+    {"key": "dt", "label": "物理 dt（秒）", "type": "float", "default": 0.005, "min": 0.001, "max": 0.02, "step": 0.001,
+     "help": "1/200 s 是常見起點。太大的 dt 會讓接觸穿透、太小會慢。"},
+    {"key": "drop_height", "label": "初始高度（m）", "type": "float", "default": 1.2, "min": 0.8, "max": 2.0, "step": 0.1,
+     "help": "比 Q1 站姿略高，讓它落地後再觀察是否站穩。"},
+    {"key": "num_envs", "label": "平行環境數", "type": "int", "default": 64, "min": 1, "max": 4096},
+    {"key": "sim_seconds", "label": "模擬秒數", "type": "float", "default": 4.0, "min": 1, "max": 20, "step": 0.5},
+    {"key": "solver_iterations", "label": "solver 迭代次數", "type": "int", "default": 4, "min": 1, "max": 32,
+     "help": "PhysX 對應 solver_position_iteration_count；Newton MJWarp 對應 MuJoCo solver iterations。"}
+  ],
+  "references": [
+    {"type": "docs", "title": "Isaac Lab 3.0 — One environment, multiple backends", "url": "https://github.com/isaac-sim/IsaacLab/releases/tag/v3.0.0"},
+    {"type": "docs", "title": "Transfer Policies Between PhysX and Newton", "url": "https://isaac-sim.github.io/IsaacLab/main/source/how-to/policy_transfer.html"},
+    {"type": "github", "title": "newton-physics/newton", "url": "https://github.com/newton-physics/newton"},
+    {"type": "github", "title": "google-deepmind/mujoco_warp", "url": "https://github.com/google-deepmind/mujoco_warp"}
+  ],
+  "quiz": [
+    {"id": "q1", "question": "在 3.0 裡，想讓 task 支援多種物理後端，環境設定應該放什麼？",
+     "choices": ["兩份 env cfg 各自 import", "sim.physics = 一個 PresetCfg 子類別，列出 isaacsim_physx / newton_mjwarp / default", "在 __init__ 用 if/else 切換 import", "只能在 CLI 選，程式碼不能表達"],
+     "answer": 1, "explain": "PresetCfg 列出可選後端與 default；CLI 的 physics=NAME 會整段替換 sim.physics。"},
+    {"id": "q2", "question": "Newton 後端的 ProxyArray 有什麼要特別注意？",
+     "choices": ["不能用 .torch", "reset 後 buffer 可能重建，不要快取 .torch 結果跨 reset 使用", "只有 CPU", "不支援接觸感測"],
+     "answer": 1, "explain": "Newton 是 auto-refresh、reset 時可能換 wrapper；PhysX 是 pull-to-refresh、buffer 穩定。兩者都應在每步重新取屬性。"},
+    {"id": "q3", "question": "哪個後端不需要安裝 Isaac Sim 就能訓練？",
+     "choices": ["isaacsim_physx", "isaacsim_rtx", "newton_mjwarp", "全部都需要"],
+     "answer": 2, "explain": "Kit-less 工作流程：Newton 物理＋Newton 渲染／GL 視覺化都不需要 Isaac Sim。PhysX 與 RTX 需要 --extra isaacsim。"},
+    {"id": "q4", "question": "PhysX 訓練好的策略能直接在 Newton 上跑嗎？",
+     "choices": ["永遠可以，因為 API 相同", "不行，必須重訓", "通常需要依官方 policy transfer 指南調整接觸／致動參數並重新驗證", "只要 dt 一樣就行"],
+     "answer": 2, "explain": "API 相同不代表動力學相同；官方提供 PhysX↔Newton 轉移指南與驗證範例，策略需重新評估。"}
+  ],
+  "run": {"kind": "isaac_v3", "trainable": false, "estimated_minutes": 4,
+          "note": "每次執行只跑一個後端；把兩次 result.json 放在一起比較。"}
+}

@@ -1,0 +1,53 @@
+{
+  "id": "l05-actuators-pd-and-limits",
+  "order": 5,
+  "title": "致動器：Implicit／DC motor／Delayed PD 與 3.0 的兩種 effort limit",
+  "title_en": "Actuators: implicit / DC motor / delayed PD and the two effort limits in 3.0",
+  "category": "actuator",
+  "level": "intermediate",
+  "minutes": 45,
+  "summary": "3.0 把致動器搬到 ActuatorCollection，並把 effort_limit 拆成 actuator_effort_limit（模型額定）與 joint_effort_limit（solver）。本課用 Q1 站姿追蹤實驗比較 PD 增益、limit 與 armature 對追蹤誤差與力矩峰值的影響。",
+  "summary_en": "3.0 moves actuators to ActuatorCollection and splits effort_limit into actuator_effort_limit (rated) and joint_effort_limit (solver). Compare PD gains, limits and armature on Q1 stance tracking error and torque peaks.",
+  "robots": ["leg", "wheel"],
+  "apis": ["isaaclab.actuators.ImplicitActuatorCfg", "DCMotorCfg", "DelayedPDActuatorCfg", "actuator_effort_limit vs joint_effort_limit", "robot.actuators.target_command.set_position_index", "robot.actuators.applied_effort.torch", "write_joint_armature_to_sim_index"],
+  "params": [
+    {"key": "actuator_type", "label": "致動器模型", "type": "select", "default": "implicit", "options": ["implicit", "dc_motor", "delayed_pd"],
+     "help": "implicit 在 solver 內算 PD；dc_motor 多了轉速-力矩包絡；delayed_pd 加入指令延遲。"},
+    {"key": "stiffness", "label": "stiffness Kp", "type": "float", "default": 80.0, "min": 0, "max": 1000, "step": 5},
+    {"key": "damping", "label": "damping Kd", "type": "float", "default": 4.0, "min": 0, "max": 100, "step": 0.5},
+    {"key": "actuator_effort_limit", "label": "actuator_effort_limit（N·m）", "type": "float", "default": 120.0, "min": 5, "max": 500, "step": 5,
+     "help": "致動器模型的額定限制；explicit 模型輸出會被它裁切。"},
+    {"key": "joint_effort_limit", "label": "joint_effort_limit（N·m）", "type": "float", "default": 120.0, "min": 5, "max": 500, "step": 5,
+     "help": "solver 端的關節限制；3.0 不再自動放大到 1e9，要 ≥ actuator_effort_limit 才不會二次裁切。"},
+    {"key": "armature", "label": "armature（kg·m²）", "type": "float", "default": 0.01, "min": 0, "max": 0.5, "step": 0.005,
+     "help": "反映馬達轉子慣量；能穩定高增益 PD。"},
+    {"key": "perturb_nm", "label": "外力擾動（N·m，step 2 s）", "type": "float", "default": 15.0, "min": 0, "max": 100, "step": 1},
+    {"key": "num_envs", "label": "平行環境數", "type": "int", "default": 32, "min": 1, "max": 2048},
+    {"key": "sim_seconds", "label": "模擬秒數", "type": "float", "default": 4.0, "min": 1, "max": 20, "step": 0.5}
+  ],
+  "references": [
+    {"type": "docs", "title": "Migrating To 3.0 — Actuator effort and joint-limit names / ActuatorCollection", "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/migrating.html"},
+    {"type": "docs", "title": "Isaac Lab actuators overview", "url": "https://isaac-sim.github.io/IsaacLab/main/source/overview/core-concepts/actuators.html"},
+    {"type": "arxiv", "title": "Learning Agile and Dynamic Motor Skills for Legged Robots (actuator net)", "url": "https://arxiv.org/abs/1901.08652"},
+    {"type": "arxiv", "title": "Learning to Walk in Minutes Using Massively Parallel Deep RL", "url": "https://arxiv.org/abs/2109.11978"}
+  ],
+  "quiz": [
+    {"id": "q1", "question": "3.0 中 actuator_effort_limit 與 joint_effort_limit 的差別是？",
+     "choices": ["同義", "前者是致動器模型的額定限制、後者是 solver 的關節限制；explicit 模型的輸出會被兩者先後裁切", "前者給 PhysX、後者給 Newton", "前者是速度限制"],
+     "answer": 1, "explain": "2.x 會把 explicit 致動器的 solver limit 放大到 1e9；3.0 保留設定值，所以要讓 joint_effort_limit ≥ actuator_effort_limit。"},
+    {"id": "q2", "question": "在 3.0 讀取施加的力矩應該用？",
+     "choices": ["robot.data.applied_torque", "robot.actuators.applied_effort.torch", "robot.get_torque()", "env.torque"],
+     "answer": 1, "explain": "data.applied_torque 是 deprecated forwarder；遙測移到 ActuatorCollection。"},
+    {"id": "q3", "question": "ImplicitActuatorCfg 與 DCMotorCfg 最大的差別？",
+     "choices": ["Implicit 只能用在 PhysX", "Implicit 的 PD 在 solver 內隱式求解、較穩定；DCMotor 是 explicit 模型，多了轉速-力矩包絡與飽和", "DCMotor 不用 stiffness", "沒有差別"],
+     "answer": 1, "explain": "Explicit 模型（DCMotor、DelayedPD、ActuatorNet）在 Python 端算力矩再送 effort 指令；Implicit 由 solver 的 drive 處理。"},
+    {"id": "q4", "question": "想在執行期改某些 env 的 armature，3.0 的做法是？",
+     "choices": ["robot.actuators['legs'].armature = x", "robot.write_joint_armature_to_sim_index(armature, env_ids=..., joint_ids=...)", "改 URDF 重載", "不能改"],
+     "answer": 1, "explain": "runtime group property armature 已移除；讀 data.joint_armature，寫 write_joint_armature_to_sim_index()。"},
+    {"id": "q5", "question": "在致動器群組裡同時寫 effort_limit=100 與 actuator_effort_limit=150 會？",
+     "choices": ["取平均", "取較小", "衝突值會 raise ValueError；同值則以 canonical 名稱為準並警告", "忽略新名稱"],
+     "answer": 2, "explain": "deprecated 與 canonical 同時出現：相等→警告並用 canonical；不同→ValueError。只寫 canonical 名稱最安全。"}
+  ],
+  "run": {"kind": "isaac_v3", "trainable": false, "estimated_minutes": 4,
+          "note": "輸出 tracking RMSE、力矩峰值、飽和比例；改增益與 limit 多跑幾次對照。"}
+}

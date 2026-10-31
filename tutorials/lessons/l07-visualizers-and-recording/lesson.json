@@ -1,0 +1,46 @@
+{
+  "id": "l07-visualizers-and-recording",
+  "order": 7,
+  "title": "視覺化器與錄影：--viz、VideoRecorderCfg、HEADLESS=1 與瀏覽器串流",
+  "title_en": "Visualizers & recording: --viz, VideoRecorderCfg, HEADLESS=1 and browser streaming",
+  "category": "recording",
+  "level": "intermediate",
+  "minutes": 35,
+  "summary": "3.0 把『看模擬』從 Kit 視窗解耦成可插拔的 visualizer（kit／newton_gl／newton_rtx／viser／rerun）。學會用 VisualizerCfg 取代 ViewerCfg、用 VideoRecorderCfg(source='viz:kit') 取代 gym RecordVideo、用 HEADLESS=1 取代 --headless，並用 viser 把 Q1 的動作直接串流到瀏覽器（Pinggy 可透）。",
+  "summary_en": "3.0 decouples 'watching the sim' from the Kit window into pluggable visualizers (kit/newton_gl/newton_rtx/viser/rerun). Replace ViewerCfg with VisualizerCfg, gym RecordVideo with VideoRecorderCfg(source='viz:kit'), --headless with HEADLESS=1, and stream Q1 motion to the browser with viser (works through Pinggy).",
+  "robots": ["leg", "wheel"],
+  "apis": ["--viz kit|newton_gl|newton_rtx|viser|rerun", "VisualizerCfg(eye, lookat)", "VideoRecorderCfg(source='viz:kit')", "HEADLESS=1", "renderer=rtx|...", "rollout.json 契約"],
+  "params": [
+    {"key": "viz", "label": "視覺化器", "type": "select", "default": "viser", "options": ["none", "viser", "rerun", "newton_gl", "kit"],
+     "help": "viser／rerun 是純 Python 服務，瀏覽器直接看；kit 需要 Isaac Sim。"},
+    {"key": "record_video", "label": "錄 result.mp4", "type": "bool", "default": true,
+     "help": "kit：VideoRecorderCfg(source='viz:kit')；其他 viz：由 rollout.json 用 Three.js 重播，mp4 由 store 端 ffmpeg 合成。"},
+    {"key": "fps", "label": "錄影 FPS", "type": "int", "default": 30, "min": 10, "max": 60},
+    {"key": "sim_seconds", "label": "模擬秒數", "type": "float", "default": 6.0, "min": 1, "max": 30, "step": 0.5},
+    {"key": "motion", "label": "示範動作", "type": "select", "default": "squat", "options": ["hold", "squat", "wave_joints", "wheel_spin"]},
+    {"key": "viser_port", "label": "viser／rerun 埠", "type": "int", "default": 8081, "min": 1024, "max": 65535}
+  ],
+  "references": [
+    {"type": "docs", "title": "Isaac Lab 3.0 release notes — Visualizers", "url": "https://github.com/isaac-sim/IsaacLab/releases/tag/v3.0.0"},
+    {"type": "docs", "title": "Migrating To 3.0 — Recording & Visualization", "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/migrating.html"},
+    {"type": "github", "title": "nerfstudio-project/viser", "url": "https://github.com/nerfstudio-project/viser"},
+    {"type": "docs", "title": "Rerun — Python quick start", "url": "https://rerun.io/docs/getting-started/quick-start/python"},
+    {"type": "docs", "title": "Isaac Sim WebRTC Livestream Client", "url": "https://docs.isaacsim.omniverse.nvidia.com/latest/installation/manual_livestream_clients.html"}
+  ],
+  "quiz": [
+    {"id": "q1", "question": "3.0 要無頭跑訓練，正確做法是？",
+     "choices": ["--headless", "HEADLESS=1 環境變數（或不帶 --viz）", "--no-gui", "--viz none 加 --headless"],
+     "answer": 1, "explain": "--headless 旗標被移除；是否開 Kit 視窗由 --viz kit 與 HEADLESS 環境變數決定。"},
+    {"id": "q2", "question": "2.x 的 gym.wrappers.RecordVideo 在 3.0 由什麼取代？",
+     "choices": ["--video", "VideoRecorderCfg(source='viz:kit') 掛在 env cfg", "cv2 手寫", "不支援錄影"],
+     "answer": 1, "explain": "錄影成為 env cfg 的一部分，來源是 visualizer，不再依賴 gym wrapper 與 render_mode。"},
+    {"id": "q3", "question": "哪個 visualizer 不需要 Isaac Sim／Kit 就能在瀏覽器看 Newton 模擬？",
+     "choices": ["kit", "viser", "newton_rtx", "omniverse streaming"],
+     "answer": 1, "explain": "viser 與 rerun 都是獨立 Python 服務；newton_gl 需要本機 OpenGL 視窗，kit／newton_rtx 需要 Isaac Sim。"},
+    {"id": "q4", "question": "設定相機視角的 cfg 在 3.0 叫什麼？",
+     "choices": ["ViewerCfg(eye, lookat)", "VisualizerCfg(eye, lookat)", "CameraCfg", "sim.set_camera_view 只能用函式"],
+     "answer": 1, "explain": "ViewerCfg 改名為 VisualizerCfg，並可掛多個 visualizer 於 env.visualizers。"}
+  ],
+  "run": {"kind": "isaac_v3", "trainable": false, "estimated_minutes": 3,
+          "note": "viz=viser 時 store 會把埠 proxy 到 /viz/<run_id>/，Pinggy 下可直接從瀏覽器看 3D。沒有 Isaac Lab 3 時只會執行 rollout 生成器（純 Python），仍可在 Three.js 重播。"}
+}

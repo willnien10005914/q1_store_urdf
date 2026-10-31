@@ -1,0 +1,47 @@
+{
+  "id": "l01-isaaclab3-overview",
+  "order": 1,
+  "title": "Isaac Lab 3.0 新架構總覽：uv、isaaclab CLI 與 preset",
+  "title_en": "Isaac Lab 3.0 overview: uv, the isaaclab CLI and presets",
+  "category": "architecture",
+  "level": "beginner",
+  "minutes": 25,
+  "summary": "Isaac Lab 3.0 改成 uv 單一安裝方式、統一的 isaaclab train/play 指令，並把 physics、renderer、visualizer 拆成可獨立選擇的 preset。本課用 Q1 站立場景走一遍啟動流程。",
+  "summary_en": "Isaac Lab 3.0 moves to uv-only installation, unified isaaclab train/play commands, and independent physics/renderer/visualizer presets. This lesson walks the launch flow with a standing Q1.",
+  "robots": ["leg", "wheel"],
+  "apis": ["uv sync --extra isaacsim", "uv run isaaclab list_envs --show_presets", "uv run isaaclab train --rl_library ... physics=...", "isaaclab.app.launch_simulation", "isaaclab.sim.SimulationCfg", "isaaclab_tasks.utils.PresetCfg"],
+  "params": [
+    {"key": "physics", "label": "物理 preset", "type": "select", "default": "newton_mjwarp",
+     "options": ["newton_mjwarp", "isaacsim_physx", "ovphysx"],
+     "help": "physics=newton_mjwarp 不需要 Isaac Sim；isaacsim_physx 需要 --extra isaacsim。"},
+    {"key": "num_envs", "label": "平行環境數", "type": "int", "default": 16, "min": 1, "max": 4096,
+     "help": "第一次啟動用少量環境確認場景與資產，再放大。"},
+    {"key": "viz", "label": "視覺化器", "type": "select", "default": "none",
+     "options": ["none", "newton_gl", "kit", "viser", "rerun"],
+     "help": "3.0 預設 headless；選 viz 才會開視窗。沒有顯示器時設 HEADLESS=1。"},
+    {"key": "sim_seconds", "label": "模擬秒數", "type": "float", "default": 3.0, "min": 0.5, "max": 30, "step": 0.5,
+     "help": "站立場景要跑多久；只是用來確認 pipeline，不是訓練。"}
+  ],
+  "references": [
+    {"type": "docs", "title": "Isaac Lab v3.0.0 release notes", "url": "https://github.com/isaac-sim/IsaacLab/releases/tag/v3.0.0"},
+    {"type": "docs", "title": "Migrating to 3.0 — Installation / Presets", "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/migrating.html"},
+    {"type": "docs", "title": "Backends and Presets", "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/backends.html"},
+    {"type": "github", "title": "isaac-sim/IsaacLab", "url": "https://github.com/isaac-sim/IsaacLab"}
+  ],
+  "quiz": [
+    {"id": "q1", "question": "Isaac Lab 3.0 唯一支援的安裝方式是？",
+     "choices": ["./isaaclab.sh --install", "conda env create", "uv sync（可加 --extra isaacsim）", "pip install isaaclab 到既有 2.x 環境"],
+     "answer": 2, "explain": "3.0 移除了 isaaclab.sh / isaaclab.bat 與 --install/--conda/--uv；官方只支援 uv，而且要新建環境，不要升級 2.x 環境。"},
+    {"id": "q2", "question": "要讓同一個 task 改用 Newton MuJoCo Warp 物理，指令要加什麼？",
+     "choices": ["--physics newton", "physics=newton_mjwarp", "--backend mjwarp", "--engine newton"],
+     "answer": 1, "explain": "preset 選擇器是 key=value 形式：physics=newton_mjwarp、renderer=...、--viz ... 是三個獨立的選擇。"},
+    {"id": "q3", "question": "想知道某個 task 支援哪些 physics／renderer／visualizer 組合，應該執行？",
+     "choices": ["uv run isaaclab list_envs --show_presets", "cat pyproject.toml", "uv run isaaclab train --all", "python -c 'import isaaclab; print(isaaclab.presets)'"],
+     "answer": 0, "explain": "list_envs --show_presets 列出每個 task 的 preset；也可用 train --task X --help。組合是 task-specific，不是全域通用。"},
+    {"id": "q4", "question": "3.0 中不選 --viz 時，程式會？",
+     "choices": ["開啟 Kit 視窗", "報錯要求指定", "headless 執行，不開任何視窗", "自動開 newton_gl"],
+     "answer": 2, "explain": "3.0 移除 --headless 旗標：沒選視覺化器就是 headless；要開視窗才選 --viz。"}
+  ],
+  "run": {"kind": "isaac_v3", "trainable": false, "estimated_minutes": 3,
+          "note": "此範例只啟動模擬並讓 Q1 站立數秒，用來確認 uv 環境、preset 與資產路徑；不會訓練。"}
+}

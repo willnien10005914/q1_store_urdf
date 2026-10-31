@@ -1,0 +1,26 @@
+{
+  "schema": "q1-tutorial.categories.v1",
+  "categories": [
+    {"id": "architecture", "label": "架構與 CLI", "label_en": "Architecture & CLI", "order": 1,
+     "description": "Isaac Lab 3 的 uv 安裝、isaaclab 指令、preset 與 launch_simulation。"},
+    {"id": "physics", "label": "物理引擎", "label_en": "Physics engines", "order": 2,
+     "description": "PhysX、Newton MuJoCo Warp、OV PhysX 的切換、dt／solver 與一致性比較。"},
+    {"id": "migration", "label": "2.x → 3.0 遷移", "label_en": "Migration 2.x → 3.0", "order": 3,
+     "description": "ProxyArray、XYZW 四元數、index／mask 寫入、actuator collection、移除的 --headless。"},
+    {"id": "urdf", "label": "URDF / USD 模型", "label_en": "URDF / USD assets", "order": 4,
+     "description": "URDF importer 3.0、UrdfConverterCfg、ArticulationCfg、關節限位與 Q1 mimic。"},
+    {"id": "actuator", "label": "致動器", "label_en": "Actuators", "order": 5,
+     "description": "Implicit／DC motor／Delayed PD、actuator_effort_limit 與 joint_effort_limit、PD 增益。"},
+    {"id": "training", "label": "訓練", "label_en": "Training", "order": 6,
+     "description": "ManagerBased 環境、reward／termination／event terms、RSL-RL PPO、checkpoint 與續訓。"},
+    {"id": "recording", "label": "視覺化與錄影", "label_en": "Visualizers & recording", "order": 7,
+     "description": "--viz kit／newton_gl／viser／rerun、VideoRecorderCfg、HEADLESS=1、瀏覽器串流。"},
+    {"id": "deployment", "label": "部署", "label_en": "Deployment", "order": 8,
+     "description": "LEAPP／ONNX 匯出、PhysX↔Newton 策略轉移、Q1 部署契約。"}
+  ],
+  "levels": [
+    {"id": "novice", "label": "新手", "label_en": "Novice", "min_completed": 0, "min_score": 0},
+    {"id": "practitioner", "label": "老手", "label_en": "Practitioner", "min_completed": 4, "min_score": 60},
+    {"id": "master", "label": "大師", "label_en": "Master", "min_completed": 8, "min_score": 80}
+  ]
+}

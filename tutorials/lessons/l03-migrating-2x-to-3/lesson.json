@@ -1,0 +1,44 @@
+{
+  "id": "l03-migrating-2x-to-3",
+  "order": 3,
+  "title": "2.x → 3.0 遷移：ProxyArray、XYZW 四元數與 index/mask 寫入",
+  "title_en": "Migrating 2.x → 3.0: ProxyArray, XYZW quaternions and index/mask writes",
+  "category": "migration",
+  "level": "intermediate",
+  "minutes": 40,
+  "summary": "把 q1_leg_urdf 的 Lab 2.x 環境碼搬到 3.0 時最常撞到的五件事：.data 回傳 ProxyArray、四元數改 XYZW、write_* 分成 _index/_mask、關節目標移到 actuators.target_command、--headless 被移除。附一個純 Python 掃描器可直接檢查你的檔案。",
+  "summary_en": "The five things that break when moving q1_leg_urdf's Lab 2.x env to 3.0: ProxyArray data, XYZW quaternions, _index/_mask writes, actuators.target_command, and the removed --headless flag. Includes a pure-Python scanner.",
+  "robots": ["leg", "wheel"],
+  "apis": ["ProxyArray.torch / .warp", "math_utils.quat_* (XYZW)", "write_root_pose_to_sim_index / _mask", "actuators.target_command.set_position_index", "actuators.applied_effort", "HEADLESS=1"],
+  "params": [
+    {"key": "scan_path", "label": "要掃描的檔案或資料夾", "type": "text", "default": "{store_root}/scripts/train_store_job.py",
+     "help": "可填 q1_leg_urdf 的 leg_humanoid_lab/isaac_env.py 等 2.x 程式路徑（worker 機器上的絕對路徑）。"},
+    {"key": "show_identity_only", "label": "只列出單位四元數", "type": "bool", "default": false,
+     "help": "只找 (1,0,0,0) 這種一定要改的硬編碼。"},
+    {"key": "max_findings", "label": "最多列出幾筆", "type": "int", "default": 80, "min": 10, "max": 500}
+  ],
+  "references": [
+    {"type": "docs", "title": "Migrating To 3.0 — 官方遷移指南", "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/migrating.html"},
+    {"type": "docs", "title": "Working with ProxyArray", "url": "https://isaac-sim.github.io/IsaacLab/v3.0.0/source/how-to/proxy_array.html"},
+    {"type": "github", "title": "q1_leg_urdf（本站 Lab 2.x 來源）", "url": "https://github.com/willnien10005914/q1_leg_urdf"}
+  ],
+  "quiz": [
+    {"id": "q1", "question": "3.0 中 robot.data.joint_pos 回傳的是？",
+     "choices": ["torch.Tensor", "numpy.ndarray", "ProxyArray（用 .torch 取 tensor、.warp 取 warp array）", "list"],
+     "answer": 2, "explain": "所有 asset／sensor 的 .data.* 都回傳 ProxyArray；.torch 是零拷貝的 cached view。"},
+    {"id": "q2", "question": "3.0 的單位四元數寫法是？",
+     "choices": ["(1, 0, 0, 0)", "(0, 0, 0, 1)", "(0, 1, 0, 0)", "兩者皆可"],
+     "answer": 1, "explain": "3.0 全面改用 XYZW（與 Warp、PhysX、Newton 一致）；2.x 的 WXYZ 單位四元數 (1,0,0,0) 在 3.0 代表繞 x 軸 180°。"},
+    {"id": "q3", "question": "2.x 的 robot.set_joint_position_target(q) 在 3.0 的對應是？",
+     "choices": ["robot.data.joint_pos_target = q", "robot.actuators.target_command.set_position_index(value=q)", "robot.write_joint_target(q)", "不變"],
+     "answer": 1, "explain": "致動器指令與遙測移到 ActuatorCollection；setter 是 keyword-only，舊方法仍可用但會 DeprecationWarning。"},
+    {"id": "q4", "question": "2.x 的 --headless 在 3.0 變成？",
+     "choices": ["仍然可用", "改成 --no-viz", "旗標移除：不選 --viz 就是 headless；要無視窗渲染設環境變數 HEADLESS=1", "改成 --viz none"],
+     "answer": 2, "explain": "視覺化器由 --viz 決定；kit 在 HEADLESS=1 下用 Replicator 離屏渲染（錄影需 --enable_cameras），newton_gl 自動用 EGL。"},
+    {"id": "q5", "question": "write_root_pose_to_sim(pose, env_ids) 在 3.0 應改成？",
+     "choices": ["write_root_pose_to_sim_index(root_pose=pose, env_ids=env_ids)", "write_root_pose(pose)", "set_root_pose(pose, env_ids)", "不用改"],
+     "answer": 0, "explain": "3.0 把 index（部分資料＋索引）與 mask（完整資料＋布林遮罩）分成兩組方法，避免 2.x 一個參數兩種語意。"}
+  ],
+  "run": {"kind": "any", "trainable": false, "estimated_minutes": 1,
+          "note": "掃描器是純 Python，不需要 Isaac；在沙盒或 Isaac Lab 3 環境都能跑。"}
+}
