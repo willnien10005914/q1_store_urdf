@@ -208,6 +208,14 @@ setup_isaaclab() {
       ok "Isaac Lab 3 at $root"
       ISAAC_RESOLVED="$root"
       if [[ -d "$root/.venv" || -f "$root/uv.lock" ]]; then ok "uv project present"; else need "uv sync in $root"; MISSING=1; fi
+      if [[ -x "$ROOT/scripts/repair_isaaclab_cuda.sh" ]]; then
+        if bash "$ROOT/scripts/repair_isaaclab_cuda.sh" --check "$root" >/dev/null 2>&1; then
+          ok "torch matches NVIDIA driver"
+        else
+          need "torch/CUDA mismatch — run: bash scripts/repair_isaaclab_cuda.sh"
+          MISSING=1
+        fi
+      fi
     else
       need "clone $ISAAC_REPO @$ISAAC_TAG → $ISAAC_DEFAULT (do not reuse ~/IsaacLab 2.x)"
       MISSING=1
@@ -251,6 +259,11 @@ setup_isaaclab() {
       fi
       printf 'extra=%s\n' "$want_extra" >"$stamp"
       ok "uv sync complete"
+    fi
+    # Lab 3.0 ships torch+cu130; pin down to the driver-advertised CUDA (e.g. 12.8 → cu128).
+    if [[ -x "$ROOT/scripts/repair_isaaclab_cuda.sh" ]]; then
+      log "aligning Isaac Lab torch with NVIDIA driver"
+      bash "$ROOT/scripts/repair_isaaclab_cuda.sh" "$root" || die "torch/CUDA repair failed"
     fi
   fi
 

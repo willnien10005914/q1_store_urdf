@@ -1,6 +1,6 @@
 """Hermes tutor agent: streams reasoning + answer, calls tools (web/arXiv/YouTube search, fetch,
-read/propose example code, set params, start a run, propose a course, remember facts) and keeps
-per-user, per-lesson conversation memory in the tutorial store.
+read/propose example code, set params, start a run, diagnose/repair runtime, propose a course,
+remember facts) and keeps per-user, per-lesson conversation memory in the tutorial store.
 
 The agent speaks Hermes' native function-calling format (``<tool_call>{json}</tool_call>`` with
 ``<tool_response>`` replies) and asks the model to think inside ``<think>`` tags so the browser can
@@ -12,12 +12,14 @@ from __future__ import annotations
 import difflib
 import json
 import re
+import subprocess
 import time
+from pathlib import Path
 
 from . import research
 from .service import APIError
 
-MAX_TOOL_ROUNDS = 4
+MAX_TOOL_ROUNDS = 6
 HOLDBACK = 16  # characters kept back while streaming so tags are never split across events
 TOOLS = [
     {"name": "web_search", "description": "Search the web (DuckDuckGo). Use for Isaac Lab / Isaac Sim docs, GitHub issues and release notes.",
@@ -26,6 +28,12 @@ TOOLS = [
     {"name": "youtube_search", "description": "Search YouTube videos.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "fetch_url", "description": "Fetch a web page as text.", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "read_example", "description": "Read the current example.py the learner is editing (returns the full source).", "parameters": {"type": "object", "properties": {}}},
+    {"name": "read_run_log", "description": "Read the latest (or given) tutorial run error + run.log tail for this lesson. Call this first when the learner says the run failed or asks to fix an error.",
+     "parameters": {"type": "object", "properties": {"run_id": {"type": "string"}}, "required": []}},
+    {"name": "diagnose_runtime", "description": "Diagnose Isaac Lab 3 / torch / NVIDIA driver / Hermes GPU / Q1_ISAACLAB3_ROOT. Use when CUDA, driver, uv, or Lab checkout errors appear.",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "repair_isaaclab_cuda", "description": "Repair Isaac Lab 3 torch wheel to match the local NVIDIA driver (e.g. cu130→cu128 on CUDA 12.8 drivers). Safe to call when diagnose_runtime reports a mismatch.",
+     "parameters": {"type": "object", "properties": {}}},
     {"name": "propose_code", "description": "Propose a full replacement example.py. The learner sees a diff and must accept it; explain why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "explanation": {"type": "string"}}, "required": ["code", "explanation"]}},
     {"name": "set_params", "description": "Set lesson parameters (sliders) for the learner, e.g. {\"num_envs\": 2048}.",
@@ -39,6 +47,10 @@ TOOLS = [
     {"name": "remember", "description": "Store durable facts about the learner (skill level, preferences, goals).",
      "parameters": {"type": "object", "properties": {"facts": {"type": "array", "items": {"type": "string"}}}, "required": ["facts"]}},
 ]
+REPAIR_HINT = re.compile(
+    r"修|錯誤|失败|失敗|error|traceback|runtimeerror|cuda|driver|blocked|fix|repair|fail",
+    re.I,
+)
 TAG_RE = re.compile(r"<think>|</think>|<tool_call>|</tool_call>")
 
 
@@ -129,13 +141,25 @@ class Agent:
         memory = self.t.memory_get(uid)["facts"]
         progress = self.t.progress(uid)
         params = context.get("params") or {}
+        last_run = context.get("last_run") or {}
+        last_run_blob = ""
+        if last_run:
+            last_run_blob = (
+                f"Latest run for this lesson: id={last_run.get('id')} state={last_run.get('state')} "
+                f"error={last_run.get('error')!r}\nlog_tail:\n{(last_run.get('log_tail') or '')[:3500]}\n"
+            )
         return (
             "You are Hermes, the Q1 Store tutor for Isaac Lab 3.0 and Isaac Sim. You teach by explaining the APIs in the current lesson, "
-            "pointing at exact lines of example.py, proposing concrete edits and parameter changes, and running experiments. "
+            "pointing at exact lines of example.py, proposing concrete edits and parameter changes, diagnosing failed runs, and repairing "
+            "the local Isaac Lab / CUDA environment when needed. "
             "Answer in the learner's language (Traditional Chinese by default; English if they write English). Be precise about 3.0 facts: "
             "ProxyArray (.torch/.warp), XYZW quaternions, write_*_to_sim_index/_mask, robot.actuators.target_command.set_*_index, "
             "actuator_effort_limit vs joint_effort_limit, launch_simulation, physics=newton_mjwarp|isaacsim_physx|ovphysx, HEADLESS=1 (no --headless), "
             "VisualizerCfg/VideoRecorderCfg, --checkpoint latest|best. If unsure, search instead of guessing, and cite URLs.\n\n"
+            "When the learner reports a failed run, asks to 修復/fix an error, or pastes a Traceback: "
+            "1) call read_run_log (or use the Latest run block below), 2) if the error mentions CUDA/driver/torch call diagnose_runtime, "
+            "3) if diagnose reports torch/driver mismatch call repair_isaaclab_cuda, 4) for example.py bugs use propose_code, "
+            "5) then start_run to verify. Do NOT ask which lesson — you already know it from context. Never reply that you cannot understand a fix request.\n\n"
             "Always start your reply with your reasoning inside <think></think>, then the answer. "
             "You have tools. To call one, emit exactly: <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call> and stop; the result arrives in a "
             "<tool_response> message, after which you continue. Never fabricate tool results. Use propose_code for any code change (full file), "
@@ -145,7 +169,8 @@ class Agent:
             f"Memory about the learner: {json.dumps(memory, ensure_ascii=False) if memory else 'none yet'}\n"
             f"Lesson: {lesson['id']} — {lesson.get('title')} (category {lesson.get('category')}, robot {context.get('robot', 'leg')}).\n"
             f"Lesson APIs: {', '.join(lesson.get('apis', []))}\nCurrent params: {json.dumps(params, ensure_ascii=False)}\n"
-            f"Lesson text (markdown):\n{lesson.get('markdown', '')[:6000]}\n"
+            f"{last_run_blob}"
+            f"Lesson text (markdown):\n{lesson.get('markdown', '')[:5000]}\n"
         )
 
     def messages(self, uid, lesson, context, user_message):
@@ -167,6 +192,22 @@ class Agent:
             raise APIError("訊息太長。")
         robot = context.get("robot") or "leg"
         lesson = self.t.lesson(lesson_id, robot=robot, user_id=uid)
+        # Always attach the newest run for this lesson so Hermes can repair without asking.
+        if not context.get("last_run"):
+            try:
+                recent = self.t.runs(uid=uid, lesson_id=lesson_id, limit=1)
+                if recent:
+                    full = self.t.run(recent[0]["id"], log_lines=60)
+                    tail = full.get("log_tail") or []
+                    context["last_run"] = {
+                        "id": full["id"],
+                        "state": full.get("state"),
+                        "error": full.get("error"),
+                        "log_tail": "\n".join(tail) if isinstance(tail, list) else str(tail),
+                        "runtime": (full.get("runtime") or {}).get("label"),
+                    }
+            except Exception:
+                pass
         self.t.append_message(uid, lesson_id, "user", message)
         self.t.touch_last(uid, lesson_id, robot)
         if self.llm is not None and self.llm.chat_ready():
@@ -231,6 +272,12 @@ class Agent:
             if name == "read_example":
                 code = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
                 return {"path": f"tutorials/lessons/{lesson['id']}/example.py", "code": code}, events
+            if name == "read_run_log":
+                return self._read_run_log(uid, lesson["id"], arguments.get("run_id") or (context.get("last_run") or {}).get("id")), events
+            if name == "diagnose_runtime":
+                return self._diagnose_runtime(context), events
+            if name == "repair_isaaclab_cuda":
+                return self._repair_isaaclab_cuda(), events
             if name == "propose_code":
                 code = str(arguments.get("code", ""))
                 if not code.strip():
@@ -272,6 +319,127 @@ class Agent:
         except APIError as exc:
             return {"error": str(exc)}, events
 
+    def _read_run_log(self, uid, lesson_id, run_id=None):
+        run = None
+        if run_id:
+            try:
+                run = self.t.run(run_id, log_lines=80)
+            except APIError:
+                run = None
+        if run is None:
+            runs = self.t.runs(uid=uid, lesson_id=lesson_id, limit=1)
+            if not runs:
+                return {"ok": False, "error": "此課程尚無執行紀錄"}
+            run = self.t.run(runs[0]["id"], log_lines=80)
+        log_tail = run.get("log_tail") or []
+        if isinstance(log_tail, list):
+            log_text = "\n".join(log_tail)
+        else:
+            log_text = str(log_tail)
+        return {
+            "ok": True,
+            "run_id": run["id"],
+            "state": run.get("state"),
+            "error": run.get("error"),
+            "runtime": (run.get("runtime") or {}).get("label"),
+            "log_tail": log_text[-6000:],
+        }
+
+    def _diagnose_runtime(self, context=None):
+        root = self.t.isaaclab3_root
+        info = {
+            "ok": True,
+            "Q1_ISAACLAB3_ROOT": str(root) if root else None,
+            "uv": bool(self.t.uv),
+            "pyproject": bool(root and (root / "pyproject.toml").is_file()),
+            "driver_cuda": None,
+            "gpu": None,
+            "torch": None,
+            "issues": [],
+            "hints": [],
+        }
+        try:
+            smi = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=8)
+            match = re.search(r"CUDA Version:\s*([0-9.]+)", smi.stdout or "")
+            info["driver_cuda"] = match.group(1) if match else None
+            mem = re.search(r"(\d+)MiB\s*/\s*(\d+)MiB", smi.stdout or "")
+            name_m = re.search(r"NVIDIA GeForce [^\n|]+|NVIDIA RTX [^\n|]+|Tesla [^\n|]+", smi.stdout or "")
+            if mem:
+                info["gpu"] = {
+                    "name": (name_m.group(0).strip() if name_m else "GPU"),
+                    "memory_used_mib": int(mem.group(1)),
+                    "memory_total_mib": int(mem.group(2)),
+                }
+                if info["gpu"]["memory_used_mib"] > info["gpu"]["memory_total_mib"] * 0.55:
+                    info["hints"].append(
+                        "Hermes/其他程序已佔用過半 VRAM；跑 Isaac Lab 前可先停止 Hermes（左側「停止伺服器」）以騰出記憶體。"
+                    )
+        except Exception as exc:
+            info["issues"].append(f"nvidia-smi failed: {exc}")
+
+        if not root:
+            info["issues"].append("Q1_ISAACLAB3_ROOT unset — run bash scripts/setup_store.sh then restart store")
+        elif not (root / "pyproject.toml").is_file():
+            info["issues"].append(f"{root} missing pyproject.toml")
+        else:
+            py = root / ".venv" / "bin" / "python"
+            if not py.is_file():
+                info["issues"].append("Isaac Lab .venv missing — run setup_store.sh / uv sync")
+            else:
+                try:
+                    proc = subprocess.run(
+                        [str(py), "-c",
+                         "import torch; print(torch.__version__); print(torch.version.cuda); "
+                         "print(int(torch.cuda.is_available()))"],
+                        capture_output=True, text=True, timeout=60)
+                    lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+                    info["torch"] = {
+                        "version": lines[0] if lines else None,
+                        "cuda": lines[1] if len(lines) > 1 else None,
+                        "available": (lines[2] == "1") if len(lines) > 2 else False,
+                        "stderr": (proc.stderr or "")[-800:],
+                    }
+                    if not info["torch"]["available"]:
+                        info["issues"].append("torch.cuda.is_available() is False — usually torch wheel CUDA > driver (Lab 3 default cu130 needs driver CUDA 13; CUDA 12.8 drivers need cu128).")
+                        info["hints"].append("Call repair_isaaclab_cuda or: bash scripts/repair_isaaclab_cuda.sh")
+                    ver = info["torch"]["version"] or ""
+                    drv = info["driver_cuda"] or ""
+                    if "+cu130" in ver and drv.startswith("12."):
+                        info["issues"].append(f"torch {ver} requires CUDA 13-capable driver; host reports {drv}")
+                        info["hints"].append("repair_isaaclab_cuda will pin torch to cu128")
+                except Exception as exc:
+                    info["issues"].append(f"torch probe failed: {exc}")
+
+        if self.llm is not None:
+            try:
+                status = self.llm.status()
+                info["hermes"] = {"chat_ready": status.get("chat_ready"), "gpu": status.get("gpu")}
+            except Exception:
+                info["hermes"] = {"chat_ready": False}
+
+        info["ok"] = not info["issues"]
+        return info
+
+    def _repair_isaaclab_cuda(self):
+        script = Path(self.t.root) / "scripts" / "repair_isaaclab_cuda.sh"
+        if not script.is_file():
+            return {"ok": False, "error": f"missing {script}"}
+        root = self.t.isaaclab3_root
+        cmd = ["bash", str(script)]
+        if root:
+            cmd.append(str(root))
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "repair timed out (>15 min)"}
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or ""))[-4000:]
+        ok = proc.returncode == 0
+        result = {"ok": ok, "exit_code": proc.returncode, "log": out}
+        if ok:
+            result["diagnose"] = self._diagnose_runtime()
+            result["note"] = "Torch repaired. Ask the learner to re-run the lesson (start_run)."
+        return result
+
     # ---------------------------------------------------------- code accept
     def accept_proposal(self, uid, lesson_id, proposal_id):
         for m in self.t.select("messages", k1=uid, k2=lesson_id):
@@ -285,7 +453,8 @@ class Agent:
 class OfflineTutor:
     """Deterministic fallback when no LLM is running: answers from lesson.md, supports slash commands."""
 
-    COMMANDS = ("/search", "/arxiv", "/youtube", "/fetch", "/run", "/params", "/code", "/remember", "/help")
+    COMMANDS = ("/search", "/arxiv", "/youtube", "/fetch", "/run", "/params", "/code", "/remember",
+                "/fix", "/diagnose", "/log", "/help")
 
     def __init__(self, agent):
         self.agent = agent
@@ -309,6 +478,7 @@ class OfflineTutor:
         answer_parts, reasoning = [], []
         lowered = message.strip()
         cmd, _, rest = lowered.partition(" ")
+        wants_fix = bool(REPAIR_HINT.search(message)) or bool((context.get("last_run") or {}).get("error"))
         if cmd in ("/search", "/arxiv", "/youtube", "/fetch"):
             tool = {"/search": "web_search", "/arxiv": "arxiv_search", "/youtube": "youtube_search", "/fetch": "fetch_url"}[cmd]
             args = {"url": rest.strip()} if tool == "fetch_url" else {"query": rest.strip()}
@@ -360,6 +530,8 @@ class OfflineTutor:
         elif cmd == "/remember":
             self.t.memory_add(uid, [rest.strip()])
             answer_parts.append("已記住。")
+        elif cmd in ("/log", "/diagnose", "/fix") or (wants_fix and cmd not in self.COMMANDS):
+            yield from self._repair_flow(uid, lesson, context, answer_parts, reasoning, do_repair=(cmd == "/fix" or "修" in message or "fix" in message.lower() or "repair" in message.lower()))
         elif cmd == "/help" or not lesson.get("markdown"):
             answer_parts.append(self.help_text(lesson))
         else:
@@ -386,10 +558,56 @@ class OfflineTutor:
         saved = self.t.append_message(uid, lesson["id"], "assistant", text, reasoning="\n".join(reasoning), mode="offline")
         yield {"type": "done", "message_id": saved["id"], "mode": "offline"}
 
+    def _repair_flow(self, uid, lesson, context, answer_parts, reasoning, do_repair=False):
+        reasoning.append("讀取最近執行紀錄並診斷 runtime")
+        yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+        yield {"type": "tool_call", "name": "read_run_log", "arguments": {}}
+        log_info, _ = self.agent.run_tool(uid, lesson, context, "read_run_log", {})
+        yield {"type": "tool_result", "name": "read_run_log", "result": self.agent.summarize(log_info)}
+        if log_info.get("ok"):
+            answer_parts.append(
+                f"**最近執行** `{log_info['run_id'][:8]}` · {log_info.get('state')} · {log_info.get('runtime')}\n\n"
+                f"錯誤：{log_info.get('error') or '（無）'}\n\n```\n{(log_info.get('log_tail') or '')[-1800:]}\n```"
+            )
+        else:
+            answer_parts.append(log_info.get("error") or "沒有執行紀錄。")
+
+        yield {"type": "tool_call", "name": "diagnose_runtime", "arguments": {}}
+        diag, _ = self.agent.run_tool(uid, lesson, context, "diagnose_runtime", {})
+        yield {"type": "tool_result", "name": "diagnose_runtime", "result": self.agent.summarize(diag)}
+        issues = diag.get("issues") or []
+        hints = diag.get("hints") or []
+        answer_parts.append(
+            "**環境診斷**\n"
+            f"- Lab root：`{diag.get('Q1_ISAACLAB3_ROOT')}`\n"
+            f"- driver CUDA：`{diag.get('driver_cuda')}`\n"
+            f"- torch：`{(diag.get('torch') or {}).get('version')}` "
+            f"(cuda={(diag.get('torch') or {}).get('cuda')}, available={(diag.get('torch') or {}).get('available')})\n"
+            + (("\n".join(f"- ⚠ {i}" for i in issues) + "\n") if issues else "- ✓ 未發現已知環境問題\n")
+            + (("\n".join(f"- 提示：{h}" for h in hints)) if hints else "")
+        )
+
+        err_blob = f"{log_info.get('error') or ''} {log_info.get('log_tail') or ''}".lower()
+        needs_cuda = any(k in err_blob for k in ("cuda", "driver", "12080", "cu130")) or any("torch" in i.lower() or "cuda" in i.lower() for i in issues)
+        if do_repair and needs_cuda:
+            reasoning.append("偵測到 CUDA/driver 不符，執行 repair_isaaclab_cuda")
+            yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+            yield {"type": "tool_call", "name": "repair_isaaclab_cuda", "arguments": {}}
+            repaired, _ = self.agent.run_tool(uid, lesson, context, "repair_isaaclab_cuda", {})
+            yield {"type": "tool_result", "name": "repair_isaaclab_cuda", "result": self.agent.summarize(repaired)}
+            if repaired.get("ok"):
+                answer_parts.append("已將 Isaac Lab 的 torch 對齊本機 driver。請再按「執行」驗證。")
+            else:
+                answer_parts.append(f"自動修復失敗：{repaired.get('error') or repaired.get('log')}")
+        elif needs_cuda:
+            answer_parts.append("這像是 **torch CUDA 與 NVIDIA driver 不符**。輸入 `/fix` 讓我執行 `repair_isaaclab_cuda`，或手動：`bash scripts/repair_isaaclab_cuda.sh`。")
+        else:
+            answer_parts.append("若錯誤在 example.py，請貼出關鍵行或輸入 `/code <關鍵字>`；修好後用 `/run` 再跑一次。")
+
     @staticmethod
     def help_text(lesson, short=False):
         params = ", ".join(f"`{p['key']}`" for p in lesson.get("params", [])[:8])
-        lines = ["可用指令：`/search <關鍵字>`、`/arxiv <關鍵字>`、`/youtube <關鍵字>`、`/fetch <url>`、`/params key=value …`、`/run`、`/code <字串>`、`/propose <標題>`、`/remember <事實>`。"]
+        lines = ["可用指令：`/search`、`/arxiv`、`/youtube`、`/fetch`、`/params`、`/run`、`/code`、`/log`、`/diagnose`、`/fix`、`/propose`、`/remember`、`/help`。"]
         if not short:
-            lines.append(f"這堂課的參數：{params or '（無）'}。右側可直接改 example.py 再按「執行」。")
+            lines.append(f"這堂課的參數：{params or '（無）'}。執行失敗時直接說「請修復」或打 `/fix`。")
         return "\n".join(lines)

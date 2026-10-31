@@ -33,6 +33,7 @@ const state = {
   lesson: null,
   originalCode: '',
   runId: null,
+  lastRun: null,
   runPoll: null,
   llm: null,
   pendingProposal: null,
@@ -319,10 +320,18 @@ function showRun(run) {
   el.hidden = false;
   const p = run.progress || {};
   const pct = p.max_iterations ? Math.min(100, Math.round(100 * (p.iteration || 0) / p.max_iterations)) : (run.state === 'complete' ? 100 : 5);
+  const logLines = Array.isArray(run.log_tail) ? run.log_tail : String(run.log_tail || '').split('\n').filter(Boolean);
+  state.lastRun = {
+    id: run.id,
+    state: run.state,
+    error: run.error || null,
+    log_tail: logLines.slice(-60).join('\n'),
+    runtime: run.runtime?.label || null,
+  };
   el.innerHTML = `<div style="display:flex;justify-content:space-between"><strong>${escapeHtml(run.state)}</strong><span>${escapeHtml(run.runtime?.label || '')}</span></div>
     <progress max="100" value="${pct}"></progress>
     <div>${escapeHtml(p.message || p.phase || run.error || '')}</div>
-    <div class="log">${(run.log_tail || []).slice(-20).map(escapeHtml).join('\n')}</div>`;
+    <div class="log">${logLines.slice(-20).map(escapeHtml).join('\n')}</div>`;
   $('cancel-btn').hidden = !['queued','starting','running'].includes(run.state);
   $('resume-btn').hidden = !run.can_resume;
   const media = $('run-media');
@@ -563,7 +572,12 @@ async function sendChat() {
         user: state.user.id,
         lesson: state.lessonId,
         message,
-        context: {robot: state.robot, params: collectParams(), code: $('code').value},
+        context: {
+          robot: state.robot,
+          params: collectParams(),
+          code: $('code').value,
+          last_run: state.lastRun || null,
+        },
       }),
     });
     if (!res.ok) {

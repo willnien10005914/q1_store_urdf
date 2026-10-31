@@ -171,6 +171,25 @@ class AgentTests(unittest.TestCase):
         events = list(self.agent.chat(self.uid, lesson["id"], "/params num_envs=64", {"robot": "leg", "params": {}}))
         self.assertTrue(any(e.get("type") == "params" for e in events))
 
+    def test_diagnose_runtime_tool(self):
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
+        result, events = self.agent.run_tool(self.uid, lesson, {"robot": "leg"}, "diagnose_runtime", {})
+        self.assertIn("issues", result)
+        self.assertIn("Q1_ISAACLAB3_ROOT", result)
+
+    def test_offline_fix_reads_run_without_asking_which_lesson(self):
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "請修復執行錯誤",
+            {"robot": "leg", "params": {}, "last_run": {"id": "x", "state": "failed",
+             "error": "RuntimeError: driver too old", "log_tail": "torch.cuda"}},
+        ))
+        types = [e.get("type") for e in events]
+        self.assertIn("tool_call", types)
+        self.assertTrue(any(e.get("name") == "diagnose_runtime" for e in events if e.get("type") == "tool_call"))
+        done = next(e for e in events if e.get("type") == "done")
+        self.assertEqual(done.get("mode"), "offline")
+
 
 class TutorialHTTPTests(unittest.TestCase):
     @classmethod
