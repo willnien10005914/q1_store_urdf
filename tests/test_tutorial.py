@@ -14,7 +14,7 @@ from unittest import mock
 from q1store.agent import (
     Agent, OfflineTutor, TagStreamer, inject_progress_logging, EDIT_HINT, REPAIR_HINT,
     EXAMPLE_API_HINT, ISAAC_SIM_MISSING_HINT, apply_simple_code_intent, extract_fenced_python,
-    fix_known_example_api_errors,
+    fix_known_example_api_errors, normalize_hermes_tags, strip_leaked_hermes_tags,
 )
 from q1store.llm import LLMManager, MODELS
 from q1store.service import Store
@@ -166,6 +166,27 @@ class AgentTests(unittest.TestCase):
         self.assertIn("token", types)
         self.assertIn("tool_call", types)
         self.assertEqual(s.tool_calls[0]["name"], "web_search")
+
+    def test_tag_streamer_accepts_html_escaped_think(self):
+        self.assertEqual(normalize_hermes_tags("&lt;think&gt;x&lt;/think&gt;"), "<think>x</think>")
+        self.assertEqual(
+            normalize_hermes_tags("&amp;lt;think&amp;gt;&amp;lt;/think&amp;gt;"),
+            "<think></think>",
+        )
+        self.assertEqual(strip_leaked_hermes_tags("&lt;think&gt;&lt;/think&gt;hello"), "hello")
+        s = TagStreamer()
+        events = []
+        # Stream escaped tags one character at a time (regression for HOLDBACK / leak).
+        for ch in "&lt;think&gt;why&lt;/think&gt;ok":
+            events += s.feed(ch)
+        events += s.feed("", final=True)
+        tokens = "".join(e["text"] for e in events if e["type"] == "token")
+        reasoning = "".join(e["text"] for e in events if e["type"] == "reasoning")
+        self.assertEqual(reasoning, "why")
+        self.assertEqual(tokens, "ok")
+        self.assertNotIn("think", tokens.lower())
+        self.assertNotIn("&lt;", tokens)
+        self.assertNotIn("&amp;", tokens)
 
     def test_offline_help_and_params(self):
         lesson = self.t.lesson("l02-multi-backend-physics", robot="leg", user_id=self.uid)

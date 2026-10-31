@@ -1262,7 +1262,7 @@ function appendChat(role, text, extra) {
   if (extra?.reasoning) {
     const r = document.createElement('span');
     r.className = 'reason';
-    r.textContent = scrubHermesTags(extra.reasoning) || extra.reasoning;
+    r.textContent = extra.reasoning;
     div.appendChild(r);
   }
   const body = document.createElement('span');
