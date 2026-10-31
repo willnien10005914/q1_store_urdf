@@ -41,6 +41,6 @@
      "choices": ["ViewerCfg(eye, lookat)", "VisualizerCfg(eye, lookat)", "CameraCfg", "sim.set_camera_view 只能用函式"],
      "answer": 1, "explain": "ViewerCfg 改名為 VisualizerCfg，並可掛多個 visualizer 於 env.visualizers。"}
   ],
-  "run": {"kind": "isaac_v3", "trainable": false, "estimated_minutes": 3,
+  "run": {"kind": "isaac_v3", "trainable": false, "estimated_minutes": 3, "fallback": true,
           "note": "viz=viser 時 store 會把埠 proxy 到 /viz/<run_id>/，Pinggy 下可直接從瀏覽器看 3D。沒有 Isaac Lab 3 時只會執行 rollout 生成器（純 Python），仍可在 Three.js 重播。"}
 }

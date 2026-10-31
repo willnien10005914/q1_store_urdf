@@ -121,10 +121,21 @@ progress("exporting", 1, 4, message=f"checkpoint={'demo' if demo else loaded_fro
 fmt = P.get("export_format", "onnx")
 dummy = torch.zeros(1, OBS_DIM)
 outputs = {}
+export_errors = {}
 if fmt in ("onnx", "both"):
-    torch.onnx.export(model, dummy, str(JOB / "policy.onnx"), input_names=["obs"], output_names=["actions"],
-                      dynamic_axes={"obs": {0: "batch"}, "actions": {0: "batch"}}, opset_version=int(P.get("opset", 17)))
-    outputs["onnx"] = "policy.onnx"
+    kwargs = dict(input_names=["obs"], output_names=["actions"], dynamic_axes={"obs": {0: "batch"}, "actions": {0: "batch"}},
+                  opset_version=int(P.get("opset", 17)))
+    try:
+        try:
+            # torch >= 2.5 defaults to the dynamo exporter (needs onnxscript); the TorchScript exporter is enough for an MLP.
+            torch.onnx.export(model, dummy, str(JOB / "policy.onnx"), dynamo=False, **kwargs)
+        except TypeError:
+            torch.onnx.export(model, dummy, str(JOB / "policy.onnx"), **kwargs)
+        outputs["onnx"] = "policy.onnx"
+    except Exception as exc:  # report the real reason (e.g. missing onnx/onnxscript) rather than faking a bundle
+        export_errors["onnx"] = f"{type(exc).__name__}: {str(exc).splitlines()[0][:200]}"
+        if fmt == "onnx":
+            fmt = "torchscript"
 if fmt in ("torchscript", "both"):
     torch.jit.trace(model, dummy).save(str(JOB / "policy.pt"))
     outputs["torchscript"] = "policy.pt"
@@ -172,7 +183,10 @@ if P.get("cross_backend_check"):
         cross = {"status": "skipped", "reason": "isaaclab 3 not importable"}
 
 result = {"demo": demo, "checkpoint": loaded_from, "export_format": fmt, "files": outputs, "obs_dim": OBS_DIM, "act_dim": ACT_DIM,
-          "tolerance": tol, **errors, "passed": passed, "bundle_sha256": digest.hexdigest(), "cross_backend": cross}
+          "tolerance": tol, **errors, "passed": passed, "bundle_sha256": digest.hexdigest(), "cross_backend": cross,
+          "export_errors": export_errors or None}
+if not outputs:
+    result["error"] = "no export succeeded: " + json.dumps(export_errors)
 (JOB / "result.json").write_text(json.dumps(result, indent=2))
 progress("complete", 4, 4, **{k: v for k, v in result.items() if k != "cross_backend"})
 print("[lesson08] " + json.dumps(result))

@@ -15,12 +15,30 @@ import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from q1store.service import APIError, MAX_MOTION, MAX_UPLOAD, Store, VIDEO_EXTENSIONS
+from q1store.tutorial import Tutorial
+from q1store.llm import LLMManager
+from q1store.agent import Agent
 
 ROOT = Path(__file__).resolve().parent
 MAX_JSON = 2 * 1024 * 1024
 GZIP_SUFFIXES = {".js", ".css", ".stl", ".urdf", ".json", ".svg"}
 GZIP_CACHE = {}
 GZIP_LOCK = threading.Lock()
+SERVICES_LOCK = threading.Lock()
+HEX32 = r"[0-9a-f]{32}"
+LESSON_ID = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}"
+
+
+def attach_services(server, start_threads=True):
+    """Tutorial, LLM and agent services share the store's data dir; created once per server."""
+    with SERVICES_LOCK:
+        if getattr(server, "tutorial", None) is None:
+            server.tutorial = Tutorial(server.store.root, server.store.data_dir, clock=server.store.clock, start_threads=start_threads)
+        if getattr(server, "llm", None) is None:
+            server.llm = LLMManager(server.store.data_dir, clock=server.store.clock)
+        if getattr(server, "agent", None) is None:
+            server.agent = Agent(server.tutorial, server.llm, clock=server.store.clock)
+    return server
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -29,6 +47,145 @@ class Handler(BaseHTTPRequestHandler):
     @property
     def store(self):
         return self.server.store
+
+    @property
+    def tutorial(self):
+        return attach_services(self.server).tutorial
+
+    @property
+    def llm(self):
+        return attach_services(self.server).llm
+
+    @property
+    def agent(self):
+        return attach_services(self.server).agent
+
+    def query(self):
+        return {key: values[0] for key, values in parse_qs(urlsplit(self.path).query).items()}
+
+    def sse(self, events):
+        """Stream dict events as Server-Sent Events; the generator may raise APIError before the first event."""
+        iterator = iter(events)
+        try:
+            first = next(iterator)
+        except StopIteration:
+            first = None
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for event in ([first] if first is not None else []):
+            self.wfile.write(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode())
+            self.wfile.flush()
+        for event in iterator:
+            self.wfile.write(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode())
+            self.wfile.flush()
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+    def route_tutorial_get(self, path):
+        q = self.query()
+        t = self.tutorial
+        if path == "/api/tutorial/catalog":
+            return self.json_response(t.catalog(robot=q.get("robot"), user_id=q.get("user")))
+        match = re.fullmatch(rf"/api/tutorial/lessons/({LESSON_ID})", path)
+        if match:
+            return self.json_response(t.lesson(match.group(1), robot=q.get("robot", "leg"), user_id=q.get("user")))
+        if path == "/api/tutorial/users":
+            return self.json_response({"users": t.users()})
+        match = re.fullmatch(rf"/api/tutorial/users/({HEX32})", path)
+        if match:
+            return self.json_response({"user": t.user(match.group(1)), "progress": t.progress(match.group(1))})
+        match = re.fullmatch(rf"/api/tutorial/users/({HEX32})/progress", path)
+        if match:
+            return self.json_response(t.progress(match.group(1)))
+        if path == "/api/tutorial/runs":
+            return self.json_response({"runs": t.runs(uid=q.get("user"), lesson_id=q.get("lesson"))})
+        match = re.fullmatch(rf"/api/tutorial/runs/({HEX32})(/log|/code)?", path)
+        if match:
+            if match.group(2) == "/log":
+                return self.json_response({"id": match.group(1), "log_tail": t.run(match.group(1), log_lines=400)["log_tail"]})
+            if match.group(2) == "/code":
+                return self.json_response({"id": match.group(1), "code": t.run_code(match.group(1))})
+            return self.json_response(t.run(match.group(1)))
+        if path == "/api/tutorial/proposals":
+            return self.json_response({"proposals": t.proposals(status=q.get("status")), "counts": t.proposal_counts()})
+        match = re.fullmatch(r"/api/tutorial/proposals/([a-z0-9][a-z0-9-]{0,80})(/cursor-prompt)?", path)
+        if match:
+            if match.group(2):
+                return self.json_response({"id": match.group(1), "prompt": t.cursor_prompt(match.group(1))})
+            return self.json_response(t.proposal(match.group(1)))
+        if path == "/api/tutorial/ticker":
+            return self.json_response({"items": t.ticker(), "counts": t.proposal_counts(), "discovery": t.discovery.status()})
+        if path == "/api/tutorial/discovery":
+            return self.json_response(t.discovery.status())
+        if path == "/api/llm/status":
+            return self.json_response(self.llm.status())
+        if path == "/api/llm/downloads":
+            return self.json_response({"downloads": self.llm.download_status()})
+        if path == "/api/llm/log":
+            return self.json_response({"lines": self.llm.server_log()})
+        if path == "/api/agent/history":
+            if not re.fullmatch(HEX32, q.get("user", "")) or not re.fullmatch(LESSON_ID, q.get("lesson", "")):
+                raise APIError("需要 user 與 lesson。")
+            return self.json_response({"messages": t.history(q["user"], q["lesson"]), "memory": t.memory_get(q["user"])["facts"]})
+        raise APIError("找不到 API。", 404)
+
+    def route_tutorial_post(self, path, payload):
+        t = self.tutorial
+        if path == "/api/tutorial/users":
+            return t.register_user(payload.get("name"))
+        match = re.fullmatch(rf"/api/tutorial/users/({HEX32})/lessons/({LESSON_ID})/(start|draft|quiz)", path)
+        if match:
+            uid, lesson_id, action = match.groups()
+            if action == "start":
+                return t.start_lesson(uid, lesson_id, payload.get("robot", "leg"))
+            if action == "draft":
+                return t.save_draft(uid, lesson_id, code=payload.get("code"), params=payload.get("params"))
+            return t.grade_quiz(uid, lesson_id, payload.get("answers"))
+        if path == "/api/tutorial/runs":
+            uid = payload.get("user")
+            if not re.fullmatch(HEX32, uid or ""):
+                raise APIError("需要 user。")
+            return t.create_run(uid, payload.get("lesson"), payload.get("robot", "leg"), payload.get("params") or {}, payload.get("code"))
+        match = re.fullmatch(rf"/api/tutorial/runs/({HEX32})/(cancel|resume)", path)
+        if match:
+            return t.cancel_run(match.group(1)) if match.group(2) == "cancel" else t.resume_run(match.group(1), payload.get("params"))
+        match = re.fullmatch(r"/api/tutorial/proposals/([a-z0-9][a-z0-9-]{0,80})/(approve|reject|reopen|mark-created)", path)
+        if match:
+            pid, action = match.groups()
+            if action == "mark-created":
+                return t.mark_created(pid, payload.get("lesson_id"))
+            return t.set_proposal_status(pid, {"approve": "approved", "reject": "rejected", "reopen": "pending"}[action])
+        if path == "/api/tutorial/proposals":
+            return t.write_proposal(str(payload.get("title", ""))[:120], str(payload.get("summary", ""))[:500], payload.get("category", "other"),
+                                    payload.get("sources") or [], str(payload.get("body", "")), origin="manual")
+        if path == "/api/tutorial/discovery":
+            if payload.get("run_now"):
+                threading.Thread(target=t.discovery.run_once, daemon=True).start()
+                return {**t.discovery.status(), "running": True}
+            return t.discovery.configure(enabled=payload.get("enabled"), interval_minutes=payload.get("interval_minutes"),
+                                         topics=payload.get("topics"), max_per_run=payload.get("max_per_run"))
+        if path == "/api/llm/download":
+            try:
+                return self.llm.start_download(payload.get("model_id"))
+            except ValueError as exc:
+                raise APIError(str(exc))
+        if path == "/api/llm/server":
+            try:
+                if payload.get("action") == "stop":
+                    return self.llm.stop_server()
+                return self.llm.start_server(payload.get("model_id"), backend=payload.get("backend"), port=payload.get("port"))
+            except ValueError as exc:
+                raise APIError(str(exc))
+        if path == "/api/agent/clear":
+            t.clear_history(payload.get("user"), payload.get("lesson"))
+            return {"ok": True}
+        if path == "/api/agent/accept":
+            return self.agent.accept_proposal(payload.get("user"), payload.get("lesson"), payload.get("proposal_id"))
+        raise APIError("找不到 API。", 404)
 
     def json_response(self, payload, status=200, download=None):
         body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
@@ -109,8 +266,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             worker = self.store.worker_status()
             return self.json_response({"ok": True, "service": "q1-motion-store", "gpu_worker": worker["online"], "worker": worker})
+        if path.startswith(("/api/tutorial/", "/api/llm/", "/api/agent/")):
+            return self.route_tutorial_get(path)
         if path.startswith("/api/"):
             raise APIError("找不到 API。", 404)
+        if path.startswith("/media/tutorial/"):
+            match = re.fullmatch(rf"/media/tutorial/({HEX32})/([A-Za-z0-9_.-]+)", path)
+            if not match:
+                raise APIError("找不到檔案。", 404)
+            file_path, content_type = self.tutorial.run_media(match.group(1), match.group(2))
+            return self.serve_file(file_path, head, cache="no-cache", content_type=content_type)
         if path.startswith("/media/jobs/"):
             match = re.fullmatch(r"/media/jobs/([0-9a-f]{32})/([A-Za-z0-9_.-]+)", path)
             if not match:
@@ -124,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise APIError("找不到影片。", 404)
             file_path = self.store.upload_dir / name
         else:
-            relative = "index.html" if path in ("/", "/store", "/store/") else path.lstrip("/")
+            relative = "index.html" if path in ("/", "/store", "/store/") else "tutorial.html" if path in ("/tutorial", "/tutorial/") else path.lstrip("/")
             candidate = Path(relative)
             if any(part.startswith(".") for part in candidate.parts) or ".." in candidate.parts:
                 raise APIError("找不到檔案。", 404)
@@ -245,6 +410,13 @@ class Handler(BaseHTTPRequestHandler):
                 raise APIError("請求內容不是有效的 JSON。")
             if not isinstance(payload, dict):
                 raise APIError("請求內容必須是 JSON object。")
+            if path == "/api/agent/chat":
+                uid, lesson = payload.get("user"), payload.get("lesson")
+                if not re.fullmatch(HEX32, uid or "") or not re.fullmatch(LESSON_ID, lesson or ""):
+                    raise APIError("需要 user 與 lesson。")
+                return self.sse(self.agent.chat(uid, lesson, payload.get("message"), payload.get("context") or {}))
+            if path.startswith(("/api/tutorial/", "/api/llm/", "/api/agent/")):
+                return self.json_response(self.route_tutorial_post(path, payload), 200)
             if path == "/api/ingest":
                 result = self.store.ingest(payload)
             elif path == "/api/clips":
@@ -295,7 +467,10 @@ def main():
     store = Store(ROOT, args.data_dir)
     with ThreadingHTTPServer((args.host, args.port), Handler) as server:
         server.store = store
+        attach_services(server)
         print(f"Q1 Motion Store: http://{args.host}:{args.port}/", flush=True)
+        print(f"  Isaac Lab 3 tutorial: http://{args.host}:{args.port}/tutorial"
+              f"  (Isaac Lab 3: {server.tutorial.isaaclab3_root or 'not configured — set Q1_ISAACLAB3_ROOT'})", flush=True)
         if args.host in {"0.0.0.0", "::"}:
             for url in lan_urls(args.port):
                 print(f"  open {url}", flush=True)
