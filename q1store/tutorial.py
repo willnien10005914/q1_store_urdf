@@ -77,6 +77,20 @@ def pid_alive(pid):
         return False
 
 
+def load_json_file(path):
+    """Load JSON written by lesson scripts; tolerate Python's non-standard NaN/Infinity."""
+    try:
+        text = Path(path).read_text()
+    except OSError:
+        return None
+    text = re.sub(r"\bNaN\b", "null", text)
+    text = re.sub(r"\b-?Infinity\b", "null", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
 def parse_front_matter(text):
     """Minimal YAML-ish front matter: scalars and '- ' lists between two '---' lines."""
     meta, body = {}, text
@@ -429,6 +443,15 @@ class Tutorial:
         facts = self.robot_facts(robot)
         if not facts.get("available"):
             raise APIError("找不到此機型的 URDF。", 500)
+        self._heal_stale_runs()
+        active = [r for r in self.select("runs", k1=uid) if r.get("state") in RUN_ACTIVE]
+        if active:
+            cur = active[0]
+            raise APIError(
+                f"已有執行在進行（{cur.get('state')} · {cur['id'][:8]}）。"
+                "請先等待完成，或按「取消」後再執行。",
+                409,
+            )
         clean = self.validate_params(meta, params or {})
         code = code if isinstance(code, str) and code.strip() else (self.lessons_dir / lesson_id / "example.py").read_text()
         if len(code) > MAX_CODE:
@@ -533,6 +556,35 @@ class Tutorial:
         base = ((self.lesson_meta(run["lesson_id"]).get("run") or {}).get("estimated_minutes") or 5) * 6
         return max(base, minutes + 30) * 60
 
+    def _finalize_exited_run(self, run, code=None, reason=None):
+        """Mark a run finished from progress/result on disk (handles NaN JSON and lost pollers)."""
+        directory = self.run_dir(run["id"])
+        progress = load_json_file(directory / "progress.json")
+        result = load_json_file(directory / "result.json")
+        if progress:
+            run["progress"] = progress
+            run["phase"] = progress.get("phase")
+        run["result"] = result
+        run["finished_at"] = now_iso(self.clock())
+        ok_result = result is not None and not result.get("error")
+        done_phase = bool(progress and progress.get("phase") == "complete")
+        if (code in (0, None) and ok_result) or (code is None and (ok_result or done_phase)):
+            run["state"] = "complete"
+            run["error"] = None
+            if result is None and progress:
+                run["result"] = {k: progress.get(k) for k in ("physics", "num_envs", "steps", "message") if k in progress}
+        else:
+            run["state"] = "failed" if code not in (0, None) else "interrupted"
+            run["error"] = (
+                (result or {}).get("error")
+                or reason
+                or (f"exit code {code}; 見 run.log" if code not in (0, None) else "程序已結束但狀態未更新；見 run.log")
+            )
+        if self.ffmpeg and (directory / "rollout.json").exists() and not (directory / "result.mp4").exists():
+            run["video_note"] = "rollout.json 可在瀏覽器重播；mp4 需 viz=kit 或 scripts/rollout_to_mp4.py"
+        self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
+        return run
+
     def _poll(self, run_id, process):
         try:
             deadline = time.monotonic() + self._timeout_for(self.get("runs", run_id))
@@ -541,29 +593,14 @@ class Tutorial:
                 if run is None or run["state"] in ("cancelled",):
                     break
                 directory = self.run_dir(run_id)
-                try:
-                    run["progress"] = json.loads((directory / "progress.json").read_text())
-                    run["phase"] = run["progress"].get("phase")
-                except (OSError, json.JSONDecodeError):
-                    pass
+                progress = load_json_file(directory / "progress.json")
+                if progress:
+                    run["progress"] = progress
+                    run["phase"] = progress.get("phase")
                 exited = process.poll() is not None if process is not None else not pid_alive(run.get("pid"))
                 if exited:
                     code = process.returncode if process is not None else None
-                    result = None
-                    try:
-                        result = json.loads((directory / "result.json").read_text())
-                    except (OSError, json.JSONDecodeError):
-                        pass
-                    run["result"] = result
-                    run["finished_at"] = now_iso(self.clock())
-                    if code in (0, None) and result is not None and not result.get("error"):
-                        run["state"] = "complete"
-                    else:
-                        run["state"] = "failed"
-                        run["error"] = (result or {}).get("error") or f"exit code {code}; 見 run.log"
-                    if self.ffmpeg and (directory / "rollout.json").exists() and not (directory / "result.mp4").exists():
-                        run["video_note"] = "rollout.json 可在瀏覽器重播；mp4 需 viz=kit 或 scripts/rollout_to_mp4.py"
-                    self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
+                    self._finalize_exited_run(run, code=code)
                     break
                 if time.monotonic() > deadline:
                     self._kill(run)
@@ -587,19 +624,50 @@ class Tutorial:
                 except OSError:
                     pass
 
+    def _heal_stale_runs(self):
+        """Recover starting/running rows whose process died (lost poller / NaN result.json)."""
+        changed = False
+        for run in self.select("runs"):
+            if run.get("state") not in ("starting", "running"):
+                continue
+            if pid_alive(run.get("pid")):
+                if run["id"] not in self.pollers:
+                    self._watch(run["id"])
+                continue
+            self._finalize_exited_run(
+                run,
+                code=None,
+                reason="程序已不在（可能上次結果含 NaN 導致狀態沒更新）。",
+            )
+            changed = True
+        return changed
+
     def _pump(self):
         """Start queued runs: python-only runs immediately, one Isaac Lab run at a time."""
         with self.lock:
+            self._heal_stale_runs()
             runs = self.select("runs", newest=False)
             gpu_busy = any(r["state"] in ("starting", "running") and r["runtime"]["mode"] == "isaaclab3" for r in runs)
+            active_gpu = next((r for r in runs if r["state"] in ("starting", "running") and r["runtime"]["mode"] == "isaaclab3"), None)
             for run in runs:
                 if run["state"] != "queued":
                     continue
                 if run["runtime"]["mode"] == "isaaclab3":
                     if gpu_busy:
+                        # Surface why the black log stays empty while queued.
+                        reason = (
+                            f"排隊等待 GPU：另一個 Isaac Lab 執行佔用中"
+                            f"（{active_gpu['id'][:8]} · {active_gpu.get('state')}）。"
+                            if active_gpu else
+                            "排隊等待 GPU。"
+                        )
+                        if run.get("wait_reason") != reason:
+                            run["wait_reason"] = reason
+                            self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
                         continue
                     gpu_busy = True
                 run["state"] = "starting"
+                run.pop("wait_reason", None)
                 self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
                 self._launch(run, resume=bool(run.get("resume_requested")))
                 run["resume_requested"] = False
@@ -611,21 +679,42 @@ class Tutorial:
                     self._watch(run["id"])
                 else:
                     directory = self.run_dir(run["id"])
-                    run["state"] = "interrupted"
-                    run["error"] = "store 重啟時程序已不在。" + ("可續訓（latest.pt 存在）。" if (directory / "latest.pt").exists() else "")
-                    run["finished_at"] = now_iso(self.clock())
-                    self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
+                    progress = load_json_file(directory / "progress.json")
+                    result = load_json_file(directory / "result.json")
+                    if (result and not result.get("error")) or (progress and progress.get("phase") == "complete"):
+                        self._finalize_exited_run(run, code=None)
+                    else:
+                        run["state"] = "interrupted"
+                        run["error"] = "store 重啟時程序已不在。" + ("可續訓（latest.pt 存在）。" if (directory / "latest.pt").exists() else "")
+                        run["finished_at"] = now_iso(self.clock())
+                        self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
         self._pump()
 
-    def run(self, run_id, log_lines=40):
+    def run(self, run_id, log_lines=80):
+        self._heal_stale_runs()
         run = self.get("runs", run_id)
         if not run or not re.fullmatch(r"[0-9a-f]{32}", run_id or ""):
             raise APIError("找不到這次執行。", 404)
         directory = self.run_dir(run_id)
+        # Keep progress fresh even if the poller thread is behind.
+        progress = load_json_file(directory / "progress.json")
+        if progress:
+            run["progress"] = progress
+            run["phase"] = progress.get("phase")
         run["log_tail"] = tail(directory / "run.log", log_lines)
         run["files"] = sorted(p.name for p in directory.iterdir() if p.is_file() and p.name in MEDIA)
         run["can_resume"] = run["state"] in ("interrupted", "failed", "complete", "cancelled") and run["resumable"] and (directory / "latest.pt").exists()
         run["media_url"] = f"/media/tutorial/{run_id}/"
+        if run.get("state") == "queued" and run["runtime"].get("mode") == "isaaclab3" and not run.get("wait_reason"):
+            active = next(
+                (r for r in self.select("runs") if r["id"] != run_id and r.get("state") in ("starting", "running")
+                 and r.get("runtime", {}).get("mode") == "isaaclab3"),
+                None,
+            )
+            if active:
+                run["wait_reason"] = (
+                    f"排隊等待 GPU：另一個 Isaac Lab 執行佔用中（{active['id'][:8]} · {active.get('state')}）。"
+                )
         return run
 
     def runs(self, uid=None, lesson_id=None, limit=100):

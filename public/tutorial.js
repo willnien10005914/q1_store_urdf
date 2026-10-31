@@ -37,6 +37,7 @@ const state = {
   codeEditTimer: null,
   codeWide: false,   // widen code vs params inside .tut-lab
   codeFocus: false,  // hide left lesson nav + right Hermes (full-bleed code)
+  runBusy: false,
   runId: null,
   lastRun: null,
   runPoll: null,
@@ -587,23 +588,72 @@ function renderRefs(lesson) {
   ).join('') || '<li class="tut-empty">無參考資料</li>';
 }
 
+function runIsBusy(run) {
+  return !!run && ['queued', 'starting', 'running'].includes(run.state);
+}
+
+function setRunBusy(busy, run = null) {
+  state.runBusy = !!busy;
+  const btn = $('run-btn');
+  if (!btn) return;
+  btn.disabled = !!busy;
+  if (!busy) {
+    btn.textContent = getLocale() === 'en' ? 'Run' : '執行';
+    return;
+  }
+  const label = {
+    queued: getLocale() === 'en' ? 'Queued…' : '排隊中…',
+    starting: getLocale() === 'en' ? 'Starting…' : '啟動中…',
+    running: getLocale() === 'en' ? 'Running…' : '執行中…',
+  };
+  btn.textContent = label[run?.state] || (getLocale() === 'en' ? 'Running…' : '執行中…');
+}
+
+function statusLabel(state) {
+  const zh = {queued: '排隊中', starting: '啟動中', running: '執行中', complete: '完成', failed: '失敗', cancelled: '已取消', blocked: '已封鎖', interrupted: '中斷'};
+  const en = {queued: 'queued', starting: 'starting', running: 'running', complete: 'complete', failed: 'failed', cancelled: 'cancelled', blocked: 'blocked', interrupted: 'interrupted'};
+  return (getLocale() === 'en' ? en : zh)[state] || state;
+}
+
 async function startRun() {
   if (!state.user || !state.lessonId) return;
-  const params = collectParams();
-  const code = $('code').value;
-  await api(`/api/tutorial/users/${state.user.id}/lessons/${state.lessonId}/draft`, {code, params});
-  const run = await api('/api/tutorial/runs', {user: state.user.id, lesson: state.lessonId, robot: state.robot, params, code});
-  state.runId = run.id;
-  showRun(run);
-  pollRun();
+  if (state.runBusy) {
+    toast(getLocale() === 'en' ? 'A run is already in progress.' : '已有執行在進行中，請先等待或取消。');
+    return;
+  }
+  setRunBusy(true, {state: 'queued'});
+  try {
+    const params = collectParams();
+    const code = $('code').value;
+    await api(`/api/tutorial/users/${state.user.id}/lessons/${state.lessonId}/draft`, {code, params});
+    const run = await api('/api/tutorial/runs', {user: state.user.id, lesson: state.lessonId, robot: state.robot, params, code});
+    state.runId = run.id;
+    showRun(run);
+    pollRun();
+  } catch (err) {
+    setRunBusy(false);
+    throw err;
+  }
 }
 
 function showRun(run) {
   const el = $('run-status');
   el.hidden = false;
   const p = run.progress || {};
-  const pct = p.max_iterations ? Math.min(100, Math.round(100 * (p.iteration || 0) / p.max_iterations)) : (run.state === 'complete' ? 100 : 5);
+  const busy = runIsBusy(run);
+  setRunBusy(busy, run);
+  const pct = p.max_iterations
+    ? Math.min(100, Math.round(100 * (p.iteration || 0) / p.max_iterations))
+    : (run.state === 'complete' ? 100 : run.state === 'running' ? 35 : run.state === 'starting' ? 12 : 4);
   const logLines = Array.isArray(run.log_tail) ? run.log_tail : String(run.log_tail || '').split('\n').filter(Boolean);
+  const statusLines = [];
+  if (run.wait_reason) statusLines.push(run.wait_reason);
+  if (run.state === 'queued' && !run.wait_reason) statusLines.push(getLocale() === 'en' ? 'Queued — waiting for a free worker…' : '已排入佇列，等待啟動…');
+  if (run.state === 'starting' && !logLines.length) statusLines.push(getLocale() === 'en' ? 'Launching Isaac Lab (uv / importers)… first start can take a minute.' : '正在啟動 Isaac Lab（uv / importers）… 第一次可能要一分鐘。');
+  if (p.phase) statusLines.push(`phase: ${p.phase}` + (p.message ? ` — ${p.message}` : ''));
+  if (p.iteration != null && p.max_iterations) statusLines.push(`progress: ${p.iteration}/${p.max_iterations}`);
+  if (run.error) statusLines.push(run.error);
+  const shownLog = [...statusLines, ...logLines].slice(-40);
   state.lastRun = {
     id: run.id,
     state: run.state,
@@ -611,11 +661,12 @@ function showRun(run) {
     log_tail: logLines.slice(-60).join('\n'),
     runtime: run.runtime?.label || null,
   };
-  el.innerHTML = `<div style="display:flex;justify-content:space-between"><strong>${escapeHtml(run.state)}</strong><span>${escapeHtml(run.runtime?.label || '')}</span></div>
+  el.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><strong>${escapeHtml(statusLabel(run.state))}</strong><span>${escapeHtml(run.runtime?.label || '')}</span></div>
+    <div style="font-size:10px;color:#8a8a92;margin-top:4px">${escapeHtml(run.id.slice(0, 8))} · pid ${run.pid || '—'}</div>
     <progress max="100" value="${pct}"></progress>
-    <div>${escapeHtml(p.message || p.phase || run.error || '')}</div>
-    <div class="log">${logLines.slice(-20).map(escapeHtml).join('\n')}</div>`;
-  $('cancel-btn').hidden = !['queued','starting','running'].includes(run.state);
+    <div>${escapeHtml(p.message || p.phase || run.wait_reason || run.error || (busy ? (getLocale()==='en'?'Working…':'進行中…') : ''))}</div>
+    <div class="log">${shownLog.length ? shownLog.map(escapeHtml).join('\n') : (getLocale()==='en'?'(no log yet)':'(尚無 log — 啟動後會出現在這裡)')}</div>`;
+  $('cancel-btn').hidden = !busy;
   $('resume-btn').hidden = !run.can_resume;
   const media = $('run-media');
   media.innerHTML = '';
@@ -632,17 +683,25 @@ function showRun(run) {
 async function pollRun() {
   clearInterval(state.runPoll);
   if (!state.runId) return;
-  state.runPoll = setInterval(async () => {
+  const tick = async () => {
     try {
       const run = await api('/api/tutorial/runs/' + state.runId);
       showRun(run);
       if (['complete','failed','cancelled','blocked','interrupted'].includes(run.state)) {
         clearInterval(state.runPoll);
+        state.runPoll = null;
+        setRunBusy(false);
         loadRuns();
         await refreshCatalog();
       }
-    } catch { clearInterval(state.runPoll); }
-  }, 2000);
+    } catch {
+      clearInterval(state.runPoll);
+      state.runPoll = null;
+      setRunBusy(false);
+    }
+  };
+  await tick();
+  state.runPoll = setInterval(tick, 1200);
 }
 
 async function loadRuns() {
@@ -989,10 +1048,17 @@ function wire() {
   $('run-btn').addEventListener('click', () => startRun().catch((e) => toast(e.message)));
   $('cancel-btn').addEventListener('click', async () => {
     if (!state.runId) return;
-    showRun(await api(`/api/tutorial/runs/${state.runId}/cancel`, {}));
+    $('cancel-btn').disabled = true;
+    try {
+      const run = await api(`/api/tutorial/runs/${state.runId}/cancel`, {});
+      showRun(run);
+      setRunBusy(false);
+    } finally {
+      $('cancel-btn').disabled = false;
+    }
   });
   $('resume-btn').addEventListener('click', async () => {
-    if (!state.runId) return;
+    if (!state.runId || state.runBusy) return;
     const run = await api(`/api/tutorial/runs/${state.runId}/resume`, {params: collectParams()});
     showRun(run); pollRun();
   });

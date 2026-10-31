@@ -26,13 +26,26 @@ JOB.mkdir(parents=True, exist_ok=True)
 STARTED = time.monotonic()
 
 
+def _json_safe(value):
+    """Coerce values so json.dumps(..., allow_nan=False) never emits NaN/Infinity tokens."""
+    import math
+    if isinstance(value, float):
+        return None if math.isnan(value) or math.isinf(value) else value
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def progress(phase, iteration, total, **extra):
     """Progress contract shared with the Q1 Store worker (progress.json)."""
     elapsed = time.monotonic() - STARTED
     eta = (elapsed / max(iteration, 1)) * max(total - iteration, 0) if iteration else None
-    (JOB / "progress.json").write_text(json.dumps({
+    payload = _json_safe({
         "phase": phase, "iteration": iteration, "max_iterations": total, "elapsed_s": round(elapsed, 1),
-        "eta_s": None if eta is None else round(eta, 1), "num_envs": P.get("num_envs"), "updated_at": time.time(), **extra}))
+        "eta_s": None if eta is None else round(eta, 1), "num_envs": P.get("num_envs"), "updated_at": time.time(), **extra})
+    (JOB / "progress.json").write_text(json.dumps(payload, indent=2, allow_nan=False))
 
 
 # ---- 1. choose backend before any runtime import ---------------------------------------------
@@ -114,9 +127,12 @@ with launch_simulation(sim_cfg):
             height = robot.data.root_pos_w.torch[:, 2].mean().item()
             progress("running", step, steps, message=f"root height {height:.3f} m")
     height = robot.data.root_pos_w.torch[:, 2]
-    summary = {"physics": PHYSICS, "num_envs": scene.num_envs, "steps": steps,
-               "mean_root_height_m": round(height.mean().item(), 4), "min_root_height_m": round(height.min().item(), 4),
-               "upright_fraction": round((height > 0.5).float().mean().item(), 3)}
-    (JOB / "result.json").write_text(json.dumps(summary, indent=2))
+    summary = _json_safe({
+        "physics": PHYSICS, "num_envs": scene.num_envs, "steps": steps,
+        "mean_root_height_m": round(float(height.mean().item()), 4),
+        "min_root_height_m": round(float(height.min().item()), 4),
+        "upright_fraction": round(float((height > 0.5).float().mean().item()), 3),
+    })
+    (JOB / "result.json").write_text(json.dumps(summary, indent=2, allow_nan=False))
     progress("complete", steps, steps, message="done", **summary)
     print("[lesson01] " + json.dumps(summary))
