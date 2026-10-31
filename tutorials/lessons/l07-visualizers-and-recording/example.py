@@ -68,9 +68,39 @@ def motion_targets(t: float) -> list[float]:
     return out
 
 
+def finite(value, fallback=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(fallback)
+    return number if math.isfinite(number) else float(fallback)
+
+
+def sanitize_frame(frame: dict, last: dict | None) -> dict:
+    """Keep browser JSON.parse happy — never emit bare NaN/Infinity."""
+    last = last or {"root_pos": [0.0, 0.0, float(P.get("spawn_height", 0.8))],
+                    "root_quat": [0.0, 0.0, 0.0, 1.0], "q": [0.0] * len(JOINTS)}
+    pos = list(frame.get("root_pos") or last["root_pos"])
+    quat = list(frame.get("root_quat") or last["root_quat"])
+    q = list(frame.get("q") or last["q"])
+    root_pos = [finite(pos[i] if i < len(pos) else None, last["root_pos"][i]) for i in range(3)]
+    root_quat = [finite(quat[i] if i < len(quat) else None, last["root_quat"][i]) for i in range(4)]
+    nq = max(len(JOINTS), len(last["q"]), len(q))
+    clean_q = [finite(q[i] if i < len(q) else None, last["q"][i] if i < len(last["q"]) else 0.0) for i in range(nq)]
+    return {"t": round(finite(frame.get("t", frame.get("time", 0.0)), 0.0), 4),
+            "root_pos": [round(v, 4) for v in root_pos],
+            "root_quat": [round(v, 5) for v in root_quat],
+            "q": [round(v, 5) for v in clean_q]}
+
+
 def write_rollout(frames: list[dict]) -> None:
-    (JOB / "rollout.json").write_text(json.dumps({"fps": FPS, "joint_names": JOINTS, "quaternion_order": "xyzw",
-                                                   "robot": P.get("robot"), "urdf": P.get("urdf"), "frames": frames}))
+    clean, last = [], None
+    for frame in frames:
+        last = sanitize_frame(frame, last)
+        clean.append(last)
+    payload = {"fps": FPS, "joint_names": JOINTS, "quaternion_order": "xyzw",
+               "robot": P.get("robot"), "urdf": P.get("urdf"), "frames": clean}
+    (JOB / "rollout.json").write_text(json.dumps(payload, allow_nan=False))
 
 
 def fallback_kinematic() -> dict:
@@ -105,10 +135,31 @@ if not HAVE_ISAACLAB3:
     raise SystemExit(0)
 
 from isaaclab.sim import SimulationCfg  # noqa: E402
-from isaaclab_newton.physics import NewtonCfg  # noqa: E402
+from isaaclab_newton.physics import (  # noqa: E402
+    MJWarpSolverCfg,
+    NewtonCfg,
+    NewtonCollisionPipelineCfg,
+    NewtonShapeCfg,
+)
 
 DT = 1.0 / FPS
-sim_cfg = SimulationCfg(dt=DT, device="cuda:0", physics=NewtonCfg())
+# Same locomotion-capacity Newton preset as l06 — default njmax=300 overflows on Q1 and writes NaN poses.
+sim_cfg = SimulationCfg(
+    dt=DT,
+    device="cuda:0",
+    physics=NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            njmax=int(P.get("njmax", 1000)),
+            nconmax=int(P.get("nconmax", 300)),
+            iterations=int(P.get("solver_iterations", 100)),
+            integrator="implicitfast",
+            use_mujoco_contacts=False,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(max_triangle_pairs=2_500_000),
+        num_substeps=int(P.get("num_substeps", 2)),
+        default_shape_cfg=NewtonShapeCfg(margin=0.0, ke=160000.0, kd=1100.0),
+    ),
+)
 
 # Concrete visualizer cfgs (isaaclab_visualizers.*). Base VisualizerCfg has no `kind=` kwarg —
 # pick ViserVisualizerCfg / RerunVisualizerCfg / NewtonGLVisualizerCfg / KitVisualizerCfg instead.
@@ -212,8 +263,12 @@ with launch_simulation(sim_cfg):
         pos = robot.data.root_pos_w.torch[0].tolist()
         quat = robot.data.root_quat_w.torch[0].tolist()  # XYZW in 3.0
         q = robot.data.joint_pos.torch[0, idx].tolist()
-        frames.append({"t": round(t, 4), "root_pos": [round(v, 4) for v in pos], "root_quat": [round(v, 5) for v in quat],
-                       "q": [round(v, 5) for v in q]})
+        # Prefer commanded targets when physics returns non-finite values (overflow / blow-up).
+        if not all(math.isfinite(v) for v in pos + quat + q):
+            q = motion_targets(t)
+            pos = [0.0, 0.0, float(P.get("spawn_height", 0.8))]
+            quat = [0.0, 0.0, 0.0, 1.0]
+        frames.append({"t": round(t, 4), "root_pos": pos, "root_quat": quat, "q": q})
         if k % FPS == 0:
             progress("running", k, FRAMES, message=f"t={t:.1f}s viz={VIZ}", viz_url=viz_url)
     write_rollout(frames)

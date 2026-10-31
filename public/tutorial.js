@@ -199,16 +199,19 @@ function wireLayoutBar() {
 }
 
 function syncLayoutChrome() {
-  const editing = state.codeWide || state.codeFocus || document.activeElement === $('code');
+  // Do NOT key layout off document.activeElement === code: clicking「執行」blurs the
+  // textarea first, which used to snap the three-pane layout and swallow the click
+  // (users had to press Run twice). Only explicit widen / focus modes change chrome.
+  const editing = state.codeWide || state.codeFocus;
   const lab = labEl();
   const page = pageEl();
   const layout = layoutEl();
-  lab?.classList.toggle('is-editing', editing || state.codeWide);
+  lab?.classList.toggle('is-editing', editing);
   lab?.classList.toggle('is-wide', state.codeWide || state.codeFocus);
   // Widen middle code without hiding sidebars; focus is the only mode that collapses them.
-  page?.classList.toggle('is-code-editing', (editing || state.codeWide) && !state.codeFocus);
+  page?.classList.toggle('is-code-editing', editing && !state.codeFocus);
   page?.classList.toggle('is-code-focus', state.codeFocus);
-  layout?.classList.toggle('is-code-editing', (editing || state.codeWide) && !state.codeFocus);
+  layout?.classList.toggle('is-code-editing', editing && !state.codeFocus);
   layout?.classList.toggle('is-code-focus', state.codeFocus);
   document.body.classList.toggle('tut-code-focus', state.codeFocus);
   if (!state.codeWide && !state.codeFocus && lab) lab.style.removeProperty('grid-template-columns');
@@ -483,8 +486,6 @@ function wireCodeEditor() {
     const backdrop = $('code-backdrop');
     if (backdrop) backdrop.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
   });
-  ta.addEventListener('focus', () => syncLayoutChrome());
-  ta.addEventListener('blur', () => requestAnimationFrame(() => syncLayoutChrome()));
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.codeFocus) {
       e.preventDefault();
@@ -869,13 +870,23 @@ function statusLabel(state) {
   return (getLocale() === 'en' ? en : zh)[state] || state;
 }
 
+function showLabTab() {
+  document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
+  document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
+  requestAnimationFrame(() => syncCodeChrome());
+}
+
 async function startRun() {
   if (!state.user || !state.lessonId) return;
   if (state.runBusy) {
     toast(getLocale() === 'en' ? 'A run is already in progress.' : '已有執行在進行中，請先等待或取消。');
     return;
   }
+  // One click: jump to Lab pane and queue immediately (no layout snap / second press).
+  showLabTab();
   setRunBusy(true, {state: 'queued'});
+  $('run-status').hidden = false;
+  $('run-status').textContent = getLocale() === 'en' ? 'Queued…' : '排隊中…';
   try {
     const params = collectParams();
     const code = $('code').value;
@@ -884,6 +895,7 @@ async function startRun() {
     state.runId = run.id;
     showRun(run);
     pollRun();
+    $('run-status')?.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   } catch (err) {
     setRunBusy(false);
     throw err;
@@ -951,6 +963,43 @@ function frameTime(frame) {
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Python json.dumps writes bare NaN/Infinity which browsers reject — normalize first. */
+function parseRolloutJson(text) {
+  const cleaned = String(text || '')
+    .replace(/\bNaN\b/g, 'null')
+    .replace(/\b-?Infinity\b/g, 'null');
+  return JSON.parse(cleaned);
+}
+
+function finiteOr(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function sanitizeRolloutFrames(frames) {
+  let lastPos = [0, 0, 0.8];
+  let lastQuat = [0, 0, 0, 1];
+  let lastQ = null;
+  return (frames || []).map((frame, i) => {
+    const posIn = Array.isArray(frame.root_pos) ? frame.root_pos : lastPos;
+    const quatIn = Array.isArray(frame.root_quat) ? frame.root_quat : lastQuat;
+    const qIn = Array.isArray(frame.q) ? frame.q : (lastQ || []);
+    const root_pos = [0, 1, 2].map((k) => finiteOr(posIn[k], lastPos[k]));
+    const root_quat = [0, 1, 2, 3].map((k) => finiteOr(quatIn[k], lastQuat[k]));
+    const q = qIn.map((v, k) => finiteOr(v, lastQ ? lastQ[k] : 0));
+    lastPos = root_pos;
+    lastQuat = root_quat;
+    lastQ = q;
+    return {
+      ...frame,
+      t: finiteOr(frame.t ?? frame.time, i * 0.033),
+      root_pos,
+      root_quat,
+      q,
+    };
+  });
+}
+
 async function ensureRobotManifest(robotId) {
   if (!state.robotManifest) {
     const data = await fetch('/assets/robots/manifest.json').then((r) => r.json());
@@ -965,14 +1014,15 @@ function renderRunMedia(run) {
   if (!media) return;
   const files = run.files || [];
   const hasVideo = files.includes('result.mp4');
+  const hasGif = files.includes('result.gif');
   const hasRollout = files.includes('rollout.json');
-  const signature = `${run.id}|${hasVideo ? 'v' : ''}|${hasRollout ? 'r' : ''}`;
+  const signature = `${run.id}|${hasVideo ? 'v' : ''}|${hasGif ? 'g' : ''}|${hasRollout ? 'r' : ''}`;
   // Polling calls showRun often — keep the video/rollout player mounted.
   if (media.dataset.mediaSig === signature) return;
   stopRolloutPlayer();
   media.innerHTML = '';
   media.dataset.mediaSig = signature;
-  if (!hasVideo && !hasRollout) return;
+  if (!hasVideo && !hasGif && !hasRollout) return;
 
   if (hasVideo) {
     const video = document.createElement('video');
@@ -981,6 +1031,13 @@ function renderRunMedia(run) {
     video.preload = 'metadata';
     video.src = `/media/tutorial/${run.id}/result.mp4`;
     media.appendChild(video);
+  } else if (hasGif) {
+    const img = document.createElement('img');
+    img.src = `/media/tutorial/${run.id}/result.gif`;
+    img.alt = 'result.gif';
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '8px';
+    media.appendChild(img);
   }
 
   if (hasRollout) {
@@ -989,9 +1046,11 @@ function renderRunMedia(run) {
     player.innerHTML = `
       <div class="tut-rollout-stage" id="rollout-stage"></div>
       <div class="tut-rollout-toolbar">
-        <button type="button" class="button secondary" id="rollout-play">${getLocale() === 'en' ? 'Play rollout' : '播放 rollout'}</button>
+        <button type="button" class="button secondary" id="rollout-play">${getLocale() === 'en' ? 'Play on URDF' : '在 URDF 上播放'}</button>
         <a class="text-link" href="/media/tutorial/${run.id}/rollout.json" target="_blank" rel="noopener">rollout.json</a>
-        <span class="muted" id="rollout-status">${hasVideo ? (getLocale() === 'en' ? '3D joint replay' : '3D 關節重播') : (getLocale() === 'en' ? 'No mp4 — play joints here' : '無 mp4 — 在此重播關節')}</span>
+        <span class="muted" id="rollout-status">${hasVideo || hasGif
+          ? (getLocale() === 'en' ? '3D joint replay' : '3D 關節重播')
+          : (getLocale() === 'en' ? 'Replay joints on the robot mesh' : '把關節軌跡載到 URDF 上重播')}</span>
       </div>`;
     media.appendChild(player);
     const playBtn = player.querySelector('#rollout-play');
@@ -1022,8 +1081,9 @@ async function toggleRolloutPlayback(run, playBtn, statusEl, stageEl) {
       viewer.setRenderingPaused(false);
       const response = await fetch(`/media/tutorial/${run.id}/rollout.json`);
       if (!response.ok) throw Error(getLocale() === 'en' ? 'Failed to load rollout.json' : 'rollout.json 載入失敗');
-      const rollout = await response.json();
-      const frames = rollout.frames || [];
+      const raw = await response.text();
+      const rollout = parseRolloutJson(raw);
+      const frames = sanitizeRolloutFrames(rollout.frames || []);
       if (!frames.length) throw Error(getLocale() === 'en' ? 'rollout has no frames' : 'rollout 沒有影格');
       state.rolloutPlayer = {
         runId: run.id,
@@ -1047,7 +1107,10 @@ async function toggleRolloutPlayback(run, playBtn, statusEl, stageEl) {
       if (index < 0) index = player.frames.length - 1;
       const frame = player.frames[index];
       const joints = {};
-      (player.names || []).forEach((name, k) => { joints[name] = frame.q?.[k]; });
+      (player.names || []).forEach((name, k) => {
+        const v = frame.q?.[k];
+        joints[name] = Number.isFinite(v) ? v : 0;
+      });
       player.viewer.setJoints(joints);
       if (statusEl) {
         statusEl.textContent = `rollout · ${frameTime(frame).toFixed(2)} s` +
@@ -1447,7 +1510,13 @@ function wire() {
   wirePaneResize();
   wireLayoutBar();
   wireSideFolds();
-  $('run-btn').addEventListener('click', () => startRun().catch((e) => toast(e.message)));
+  // pointerdown + preventDefault keeps the click from being lost when the code
+  // textarea blurs and the layout would otherwise reflow under the cursor.
+  $('run-btn').addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    startRun().catch((err) => toast(err.message));
+  });
   $('cancel-btn').addEventListener('click', async () => {
     if (!state.runId) return;
     $('cancel-btn').disabled = true;

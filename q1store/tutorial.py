@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -89,6 +90,145 @@ def load_json_file(path):
         return json.loads(text)
     except json.JSONDecodeError:
         return None
+
+
+def _finite(value, fallback=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return float(fallback)
+    return number if math.isfinite(number) else float(fallback)
+
+
+def sanitize_rollout_file(path):
+    """Rewrite rollout.json so browsers can JSON.parse it (no bare NaN) and poses stay finite."""
+    path = Path(path)
+    data = load_json_file(path)
+    if not isinstance(data, dict) or not isinstance(data.get("frames"), list):
+        return False
+    last_pos, last_quat, last_q = [0.0, 0.0, 0.8], [0.0, 0.0, 0.0, 1.0], []
+    clean_frames = []
+    for i, frame in enumerate(data["frames"]):
+        if not isinstance(frame, dict):
+            continue
+        pos = list(frame.get("root_pos") or last_pos)
+        quat = list(frame.get("root_quat") or last_quat)
+        q = list(frame.get("q") or last_q or [])
+        new_pos = [_finite(pos[k] if k < len(pos) else None, last_pos[k]) for k in range(3)]
+        new_quat = [_finite(quat[k] if k < len(quat) else None, last_quat[k]) for k in range(4)]
+        nq = max(len(q), len(last_q), 1)
+        new_q = [
+            _finite(q[k] if k < len(q) else None, last_q[k] if k < len(last_q) else 0.0)
+            for k in range(nq)
+        ]
+        t = _finite(frame.get("t", frame.get("time", i * 0.033)), i * 0.033)
+        last_pos, last_quat, last_q = new_pos, new_quat, new_q
+        clean_frames.append({
+            **frame,
+            "t": round(t, 4),
+            "root_pos": [round(v, 4) for v in new_pos],
+            "root_quat": [round(v, 5) for v in new_quat],
+            "q": [round(v, 5) for v in new_q],
+        })
+    data["frames"] = clean_frames
+    path.write_text(json.dumps(data, allow_nan=False))
+    return True
+
+
+def render_rollout_preview(directory, ffmpeg=None):
+    """Build result.mp4 (preferred) or result.gif from rollout joint curves for the Lab panel."""
+    directory = Path(directory)
+    rollout_path = directory / "rollout.json"
+    if not rollout_path.is_file():
+        return None
+    if (directory / "result.mp4").is_file() or (directory / "result.gif").is_file():
+        return "result.mp4" if (directory / "result.mp4").is_file() else "result.gif"
+    sanitize_rollout_file(rollout_path)
+    data = load_json_file(rollout_path) or {}
+    frames = data.get("frames") or []
+    if len(frames) < 2:
+        return None
+    fps = max(1, int(data.get("fps") or 30))
+    names = list(data.get("joint_names") or [])
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except Exception:
+        return None
+    times = np.array([float(f.get("t", f.get("time", i / fps))) for i, f in enumerate(frames)], dtype=float)
+    height = np.array([float((f.get("root_pos") or [0, 0, 0])[2]) for f in frames], dtype=float)
+    # Plot up to 6 joints for a compact preview strip.
+    joint_ids = list(range(min(6, len(names) or len(frames[0].get("q") or []))))
+    series = []
+    for j in joint_ids:
+        series.append(np.array([float((f.get("q") or [0] * (j + 1))[j]) for f in frames], dtype=float))
+    frame_dir = directory / "_preview_frames"
+    if frame_dir.exists():
+        shutil.rmtree(frame_dir, ignore_errors=True)
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    # Subsample to ~90 frames for a snappy gif/mp4.
+    step = max(1, len(frames) // 90)
+    indices = list(range(0, len(frames), step))
+    if indices[-1] != len(frames) - 1:
+        indices.append(len(frames) - 1)
+    for out_i, idx in enumerate(indices):
+        fig, axes = plt.subplots(2, 1, figsize=(6.4, 4.8), dpi=100, sharex=True)
+        axes[0].plot(times, height, color="#2563eb", lw=2)
+        axes[0].axvline(times[idx], color="#dc2626", lw=1.5)
+        axes[0].set_ylabel("root z (m)")
+        axes[0].set_title(f"Q1 rollout preview  t={times[idx]:.2f}s")
+        for j, ys in enumerate(series):
+            label = names[j] if j < len(names) else f"q{j}"
+            axes[1].plot(times, ys, lw=1.2, label=label.split("_")[-2:] and "_".join(label.split("_")[-2:]) or label)
+        axes[1].axvline(times[idx], color="#dc2626", lw=1.5)
+        axes[1].set_ylabel("joint (rad)")
+        axes[1].set_xlabel("time (s)")
+        axes[1].legend(loc="upper right", fontsize=7, ncol=2, frameon=False)
+        fig.tight_layout()
+        fig.savefig(frame_dir / f"frame_{out_i:04d}.png")
+        plt.close(fig)
+    ffmpeg = ffmpeg or shutil.which("ffmpeg")
+    out_mp4 = directory / "result.mp4"
+    out_gif = directory / "result.gif"
+    if ffmpeg:
+        try:
+            subprocess.run(
+                [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                 "-framerate", str(max(8, min(fps, 20))),
+                 "-i", str(frame_dir / "frame_%04d.png"),
+                 "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_mp4)],
+                check=True, timeout=120,
+            )
+            shutil.rmtree(frame_dir, ignore_errors=True)
+            return "result.mp4"
+        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            pass
+        try:
+            subprocess.run(
+                [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                 "-framerate", str(max(6, min(fps, 12))),
+                 "-i", str(frame_dir / "frame_%04d.png"),
+                 "-vf", "scale=640:-1:flags=lanczos", str(out_gif)],
+                check=True, timeout=120,
+            )
+            shutil.rmtree(frame_dir, ignore_errors=True)
+            return "result.gif"
+        except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            pass
+    # Last resort: keep the first/mid/last stills as a tiny gif via pillow if present.
+    try:
+        from PIL import Image
+        images = [Image.open(frame_dir / f"frame_{i:04d}.png").convert("RGB") for i in range(len(indices))]
+        if images:
+            images[0].save(out_gif, save_all=True, append_images=images[1:], duration=int(1000 / max(6, min(fps, 12))), loop=0)
+            shutil.rmtree(frame_dir, ignore_errors=True)
+            return "result.gif"
+    except Exception:
+        pass
+    shutil.rmtree(frame_dir, ignore_errors=True)
+    return None
 
 
 def parse_front_matter(text):
@@ -633,10 +773,49 @@ class Tutorial:
                 or reason
                 or (f"exit code {code}; 見 run.log" if code not in (0, None) else "程序已結束但狀態未更新；見 run.log")
             )
-        if self.ffmpeg and (directory / "rollout.json").exists() and not (directory / "result.mp4").exists():
-            run["video_note"] = "rollout.json 可在瀏覽器重播；mp4 需 viz=kit 或 scripts/rollout_to_mp4.py"
+        rollout_path = directory / "rollout.json"
+        if rollout_path.is_file():
+            try:
+                sanitize_rollout_file(rollout_path)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                pass
+            run["video_note"] = "rollout.json 可在瀏覽器 URDF 上重播；預覽媒體產生中"
+            # Preview (matplotlib/ffmpeg) can take several seconds — do it off the poller thread
+            # so the run flips to complete immediately and the Lab panel can play joints ASAP.
+            self._schedule_rollout_preview(run["id"])
         self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
         return run
+
+    def _schedule_rollout_preview(self, run_id):
+        directory = self.run_dir(run_id)
+        if (directory / "result.mp4").is_file() or (directory / "result.gif").is_file():
+            return
+        marker = directory / ".preview_attempted"
+        if marker.is_file():
+            return
+        try:
+            marker.write_text("1")
+        except OSError:
+            return
+
+        def _worker():
+            try:
+                preview = render_rollout_preview(directory, ffmpeg=self.ffmpeg)
+                run = self.get("runs", run_id)
+                if not run:
+                    return
+                if preview:
+                    run["video_note"] = f"已從 rollout.json 產生 {preview}（關節曲線預覽）"
+                elif self.ffmpeg:
+                    run["video_note"] = "rollout.json 可在瀏覽器重播；mp4 需 viz=kit 或 scripts/rollout_to_mp4.py"
+                else:
+                    run["video_note"] = "rollout.json 可在瀏覽器 URDF 上重播"
+                self.put("runs", run, k1=run["user_id"], k2=run["lesson_id"])
+            except Exception:
+                # Temp-dir cleanup during tests, missing matplotlib, etc. — never crash the store.
+                pass
+
+        threading.Thread(target=_worker, daemon=True, name=f"rollout-preview-{run_id[:8]}").start()
 
     def _poll(self, run_id, process):
         try:
@@ -755,6 +934,15 @@ class Tutorial:
             run["progress"] = progress
             run["phase"] = progress.get("phase")
         run["log_tail"] = tail(directory / "run.log", log_lines)
+        # Lazy-heal older runs: rewrite NaN rollout.json; schedule gif/mp4 preview once (non-blocking).
+        if directory.is_dir() and run.get("state") in RUN_FINAL:
+            rollout_path = directory / "rollout.json"
+            if rollout_path.is_file():
+                try:
+                    sanitize_rollout_file(rollout_path)
+                except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                    pass
+                self._schedule_rollout_preview(run_id)
         run["files"] = sorted(p.name for p in directory.iterdir() if p.is_file() and p.name in MEDIA) if directory.is_dir() else []
         # Refresh artifacts from disk so Hermes / Lab UI can analyze after the process exits.
         disk_result = load_json_file(directory / "result.json") if directory.is_dir() else None
@@ -815,6 +1003,11 @@ class Tutorial:
         if name not in MEDIA or not re.fullmatch(r"[0-9a-f]{32}", run_id or ""):
             raise APIError("找不到檔案。", 404)
         path = self.run_dir(run_id) / name
+        if name == "rollout.json" and path.is_file():
+            try:
+                sanitize_rollout_file(path)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                pass
         if not path.is_file():
             raise APIError("找不到檔案。", 404)
         return path, MEDIA[name]
@@ -956,7 +1149,8 @@ class Tutorial:
         return self.select("ticker", limit=limit)
 
 
-MEDIA = {"result.mp4": "video/mp4", "rollout.json": "application/json", "result.json": "application/json", "evaluation.json": "application/json",
+MEDIA = {"result.mp4": "video/mp4", "result.gif": "image/gif", "rollout.json": "application/json",
+         "result.json": "application/json", "evaluation.json": "application/json",
          "record.json": "application/json", "progress.json": "application/json", "run.log": "text/plain; charset=utf-8",
          "latest.pt": "application/octet-stream", "policy.onnx": "application/octet-stream", "policy.pt": "application/octet-stream",
          "policy_meta.json": "application/json", "params.json": "application/json", "example.py": "text/x-python; charset=utf-8",

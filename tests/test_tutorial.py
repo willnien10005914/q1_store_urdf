@@ -19,7 +19,10 @@ from q1store.agent import (
 )
 from q1store.llm import LLMManager, MODELS
 from q1store.service import Store
-from q1store.tutorial import Tutorial, parse_front_matter, dump_front_matter
+from q1store.tutorial import (
+    Tutorial, parse_front_matter, dump_front_matter,
+    sanitize_rollout_file, render_rollout_preview, MEDIA,
+)
 from server import Handler, attach_services
 
 
@@ -75,8 +78,13 @@ class TutorialUnitTests(unittest.TestCase):
 
     def test_l07_fallback_rollout_without_isaaclab3(self):
         uid = self.t.register_user("Dana")["user"]["id"]
-        run = self.t.create_run(uid, "l07-visualizers-and-recording", "wheel", {"sim_seconds": 1, "fps": 10, "viz": "none"})
-        for _ in range(40):
+        # Force the kitless python path so this stays fast even when Isaac Lab 3 is installed.
+        self.t.isaaclab3_root = None
+        run = self.t.create_run(
+            uid, "l07-visualizers-and-recording", "wheel",
+            {"sim_seconds": 1, "fps": 10, "viz": "none"},
+        )
+        for _ in range(80):
             run = self.t.run(run["id"])
             if run["state"] in ("complete", "failed", "blocked"):
                 break
@@ -84,6 +92,68 @@ class TutorialUnitTests(unittest.TestCase):
         self.assertEqual(run["state"], "complete", run.get("error"))
         self.assertEqual(run["runtime"]["mode"], "python-fallback")
         self.assertIn("rollout.json", run["files"])
+        # Finalize should rewrite NaN-free JSON (browsers reject bare NaN via JSON.parse).
+        text = (self.t.run_dir(run["id"]) / "rollout.json").read_text()
+        self.assertNotIn("NaN", text)
+        json.loads(text)
+        self.assertTrue(
+            "result.gif" in run["files"] or "result.mp4" in run["files"] or "rollout.json" in run["files"]
+        )
+
+    def test_sanitize_rollout_rewrites_bare_nan(self):
+        path = self.data / "bad_rollout.json"
+        path.write_text(
+            '{"fps": 10, "joint_names": ["j0"], "frames": ['
+            '{"t": 0.0, "root_pos": [NaN, 0.0, 0.8], "root_quat": [0, 0, 0, 1], "q": [0.1]},'
+            '{"t": 0.1, "root_pos": [0.1, Infinity, 0.8], "root_quat": [0, 0, 0, 1], "q": [NaN]}'
+            ']}'
+        )
+        self.assertTrue(sanitize_rollout_file(path))
+        data = json.loads(path.read_text())  # strict — no bare NaN
+        self.assertEqual(data["frames"][0]["root_pos"][0], 0.0)  # NaN → previous/fallback
+        self.assertEqual(data["frames"][1]["root_pos"][1], 0.0)
+        self.assertEqual(data["frames"][1]["q"][0], 0.1)
+        self.assertIn("result.gif", MEDIA)
+        self.assertEqual(MEDIA["result.gif"], "image/gif")
+
+    def test_run_media_sanitizes_rollout_on_serve(self):
+        uid = self.t.register_user("DanaMedia")["user"]["id"]
+        run_id = "a" * 32
+        directory = self.t.run_dir(run_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "rollout.json").write_text(
+            '{"fps": 5, "frames": [{"t": 0, "root_pos": [NaN, NaN, NaN], "root_quat": [0,0,0,1], "q": [0]}]}'
+        )
+        self.t.put("runs", {
+            "id": run_id, "user_id": uid, "lesson_id": "l07-visualizers-and-recording",
+            "state": "complete", "params": {},
+        }, k1=uid, k2="l07-visualizers-and-recording")
+        path, ctype = self.t.run_media(run_id, "rollout.json")
+        self.assertEqual(ctype, "application/json")
+        payload = json.loads(path.read_text())
+        self.assertTrue(all(isinstance(v, (int, float)) for v in payload["frames"][0]["root_pos"]))
+        self.assertNotIn("NaN", path.read_text())
+
+    def test_render_rollout_preview_writes_gif_or_mp4(self):
+        directory = self.data / "preview_run"
+        directory.mkdir()
+        frames = []
+        for i in range(12):
+            frames.append({
+                "t": i * 0.1,
+                "root_pos": [0.0, 0.0, 0.8 + 0.01 * i],
+                "root_quat": [0.0, 0.0, 0.0, 1.0],
+                "q": [0.1 * i, -0.05 * i],
+            })
+        (directory / "rollout.json").write_text(json.dumps({
+            "fps": 10, "joint_names": ["left_hip", "right_hip"], "frames": frames,
+        }))
+        out = render_rollout_preview(directory, ffmpeg=self.t.ffmpeg)
+        # matplotlib may be missing in minimal envs — then None is OK; otherwise media exists.
+        if out is None:
+            self.skipTest("matplotlib/ffmpeg unavailable for preview")
+        self.assertIn(out, ("result.mp4", "result.gif"))
+        self.assertTrue((directory / out).is_file())
 
     def test_isaac_lesson_blocks_without_checkout(self):
         uid = self.t.register_user("Eve")["user"]["id"]
