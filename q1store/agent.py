@@ -1341,7 +1341,7 @@ def fix_known_example_api_errors(
         canon = (canonical_code or "").strip()
         if canon and "RslRlMLPModelCfg" in canon and "actor =" in canon and canon != text.strip():
             notes.append(
-                "RslRlPpoActorCriticCfg(policy=…) → actor/critic=RslRlMLPModelCfg（rsl-rl 5.x class_name）"
+                "deprecated policy=ActorCritic → actor/critic=MLPModel（rsl-rl 5.x class_name）"
             )
             note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
             return _stamp_hermes_note(canon if canon.endswith("\n") else canon + "\n", note), note
