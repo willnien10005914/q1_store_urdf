@@ -1634,8 +1634,16 @@ async function sendChat() {
         let ev;
         try { ev = JSON.parse(raw); } catch { continue; }
         if (ev.type === 'status') {
-          $('agent-mode').textContent = ev.mode === 'hermes' ? 'Hermes' : (getLocale()==='en'?'Offline':'離線');
-          $('agent-mode').classList.toggle('on', ev.mode === 'hermes');
+          // Tool-mode slash/repair still uses OfflineTutor but Hermes LLM may be online —
+          // only show Offline when the stream truly has no Hermes.
+          const online = ev.mode === 'hermes' || (state.llm && state.llm.chat_ready && ev.mode !== 'offline');
+          const label = ev.mode === 'hermes' || (state.llm && state.llm.chat_ready)
+            ? 'Hermes'
+            : (getLocale() === 'en' ? 'Offline' : '離線');
+          // Prefer the event mode for true Hermes replies; keep pill green whenever LLM is ready.
+          $('agent-mode').textContent = (ev.mode === 'hermes' || (state.llm && state.llm.chat_ready)) ? 'Hermes' : label;
+          $('agent-mode').classList.toggle('on', !!(ev.mode === 'hermes' || (state.llm && state.llm.chat_ready)));
+          void online;
         } else if (ev.type === 'reasoning') {
           reasonEl.hidden = false;
           reasonEl.textContent += ev.text || '';

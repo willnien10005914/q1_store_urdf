@@ -338,6 +338,32 @@ class AgentTests(unittest.TestCase):
         self.assertIn("工具模式", zh_status["text"])
         self.assertIn("這堂課的參數", zh_text)
 
+    def test_example_api_hint_does_not_match_empty(self):
+        from q1store.agent import EXAMPLE_API_HINT
+        self.assertFalse(EXAMPLE_API_HINT.search(""))
+        self.assertFalse(EXAMPLE_API_HINT.search("hi"))
+        self.assertFalse(EXAMPLE_API_HINT.search("what I can learn from this tutorial"))
+        self.assertTrue(EXAMPLE_API_HINT.search("TypeError: unexpected keyword argument 'x'"))
+
+    def test_casual_chat_not_forced_into_tool_mode(self):
+        """Regression: empty EXAMPLE_API_HINT match used to force OfflineTutor for every message."""
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "what I can learn from this tutorial",
+            {"robot": "leg", "params": {}, "locale": "en", "last_run": None},
+        ))
+        status = next(e for e in events if e.get("type") == "status")
+        # Must not enter slash/repair tool mode for a normal overview question.
+        self.assertNotIn("Tool mode", status.get("text") or "")
+
+    def test_offline_unmatched_question_searches_web(self):
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "xyzzy quantum flute unrelated question 99",
+            {"robot": "leg", "params": {}, "locale": "en"},
+        ))
+        self.assertTrue(any(e.get("type") == "tool_call" and e.get("name") == "web_search" for e in events))
+
     def test_diagnose_runtime_tool(self):
         lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
         result, events = self.agent.run_tool(self.uid, lesson, {"robot": "leg"}, "diagnose_runtime", {})

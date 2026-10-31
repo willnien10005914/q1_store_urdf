@@ -131,16 +131,18 @@ ISAAC_SIM_MISSING_HINT = re.compile(
     re.I,
 )
 EXAMPLE_API_HINT = re.compile(
+    # Keep alternatives non-empty — a leading "|" on a continued string once produced "||"
+    # which made search("") match and forced every chat into OfflineTutor.
     r"unexpected keyword argument|TypeError:|AttributeError:|KeyError:|got an unexpected keyword|"
     r"NewtonCfg\.__init__|PhysxCfg\.__init__|VisualizerCfg\.__init__|has no attribute|"
     r"get_masses|body_mass|class_name|RslRlPpoActorCriticCfg|stochastic|"
-    r"VisualizerCfg\(kind=|VideoRecorderCfg.*\.create\(|source=['\"]viz:"
-    r"|nefc overflow|increase njmax|solver iterations limit reached|"
+    r"VisualizerCfg\(kind=|VideoRecorderCfg.*\.create\(|source=['\"]viz:|"
+    r"nefc overflow|increase njmax|solver iterations limit reached|"
     r"observation group 'policy'.*NaN|contains NaN values|"
-    r"|too many values to unpack \(expected 2\)|"
-    r"|File \"example\.py\"|"
-    r"|unexpected keyword argument ['\"]duplicate_physics['\"]|"
-    r"|No current stage available|"
+    r"too many values to unpack \(expected 2\)|"
+    r"File \"example\.py\"|"
+    r"unexpected keyword argument ['\"]duplicate_physics['\"]|"
+    r"No current stage available|"
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
 )
@@ -416,13 +418,18 @@ class Agent:
             f"{(context.get('last_run') or {}).get('error') or ''} "
             f"{(context.get('last_run') or {}).get('log_tail') or ''}"
         )
-        # Failed example.py Tracebacks must go through the offline repair tools even when the
-        # learner only says「怎麼辦」— the 8B GGUF rarely calls apply_code on its own.
+        # Failed example.py Tracebacks go through repair tools only when the learner is asking
+        # about the failure — never force OfflineTutor for every casual chat ("hi", overview Qs).
+        asks_about_failure = bool(re.search(
+            r"怎麼辦|怎麼修|為什麼|為何|什麼錯|哪裡錯|help|why|what.?wrong|what.?happen|failed|失敗|錯誤|error",
+            message,
+            re.I,
+        ))
         force_tools = (
             cmd.startswith("/")
             or bool(REPAIR_HINT.search(message))
             or wants_analyze
-            or bool(EXAMPLE_API_HINT.search(last_err_blob))
+            or (bool(last_err_blob.strip()) and bool(EXAMPLE_API_HINT.search(last_err_blob)) and asks_about_failure)
         )
         if force_tools:
             if wants_analyze or cmd in ("/analyze", "/result"):
@@ -1144,11 +1151,44 @@ class OfflineTutor:
             if best:
                 answer_parts.append(f"### {best[1]}\n\n{best[2][:2500]}")
             else:
-                answer_parts.append(loc_text(
+                # Lesson keyword miss → search the web so offline mode is still useful.
+                query = message.strip()[:160] or lesson_title_for_locale(lesson, context)
+                reasoning.append(loc_text(
                     context,
-                    "我在課文裡找不到直接相關的段落。",
-                    "I could not find a directly related section in the lesson text.",
+                    f"課文沒對到，改搜尋網路：{query}",
+                    f"No lesson hit — searching the web: {query}",
                 ))
+                yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+                yield {"type": "tool_call", "name": "web_search", "arguments": {"query": query}}
+                result, events = self.agent.run_tool(uid, lesson, context, "web_search", {"query": query})
+                for e in events:
+                    yield e
+                yield {"type": "tool_result", "name": "web_search", "result": self.agent.summarize(result)}
+                if result.get("error"):
+                    answer_parts.append(loc_text(
+                        context,
+                        f"我在課文裡找不到相關段落，搜尋也失敗：{result['error']}",
+                        f"No related lesson section, and web search failed: {result['error']}",
+                    ))
+                else:
+                    hits = result.get("results") or []
+                    if hits:
+                        answer_parts.append(loc_text(
+                            context,
+                            "課文沒有直接對到的段落；這是網路上相關資料：",
+                            "No direct lesson section matched; here are related web results:",
+                        ))
+                        lines = [
+                            f"- [{r['title']}]({r['url']})" + (f" — {r['snippet'][:180]}" if r.get("snippet") else "")
+                            for r in hits[:5]
+                        ]
+                        answer_parts.append("\n".join(lines))
+                    else:
+                        answer_parts.append(loc_text(
+                            context,
+                            "我在課文與網路上都找不到直接相關的資料。",
+                            "I could not find related material in the lesson text or on the web.",
+                        ))
             api_hits = [api for api in lesson.get("apis", []) if any(w in api.lower() for w in words)]
             if api_hits:
                 sep = ", " if is_en(context) else "、"
