@@ -763,6 +763,11 @@ async function openLesson(id) {
   state.codeFocus = false;
   setCode(lesson.draft_code || lesson.code || '', {baseline: true});
   setCodeExpanded(false);
+  if (lesson.draft_healed) {
+    toast(getLocale() === 'en'
+      ? ('Updated stale example.py: ' + String(lesson.draft_healed).slice(0, 120))
+      : ('已自動修正過期的 example.py：' + String(lesson.draft_healed).slice(0, 120)));
+  }
   renderParams(lesson);
   renderQuiz(lesson);
   renderRefs(lesson);
