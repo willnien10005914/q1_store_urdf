@@ -333,10 +333,11 @@ class AgentTests(unittest.TestCase):
         fixed, note = fix_known_example_api_errors(
             broken, err, "l06-manager-based-ppo", canonical_code=canon,
         )
-        self.assertIn("RslRlMLPModelCfg", fixed)
-        self.assertIn("actor =", fixed)
-        self.assertNotIn("RslRlPpoActorCriticCfg", fixed)
-        self.assertIn("class_name", note.lower() + "mlp")
+        body = "\n".join(line for line in fixed.splitlines() if not line.startswith("# [Hermes]"))
+        self.assertIn("RslRlMLPModelCfg", body)
+        self.assertIn("actor =", body)
+        self.assertNotIn("RslRlPpoActorCriticCfg", body)
+        self.assertIn("MLPModel", note)
 
     def test_fix_get_masses_to_body_mass(self):
         err = "AttributeError: 'ArticulationView' object has no attribute 'get_masses'\n"
