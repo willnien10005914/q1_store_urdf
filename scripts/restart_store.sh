@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
-# Restart Q1 Store web (+ Hermes by default via start_store.sh).
+# Restart Q1 Store web (+ Hermes by default via start_store.sh) and Pinggy.
 #   bash scripts/restart_store.sh --port 8878
 #   bash scripts/restart_store.sh --port 8878 --no-hermes
-#   bash scripts/restart_store.sh --port 8878 --with-pinggy
+#   bash scripts/restart_store.sh --port 8878 --no-pinggy   # skip public tunnel
 set -euo pipefail
 
 Q1_STORE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${Q1_STORE_PORT:-8878}"
 LLM_PORT="${Q1_LLM_PORT:-8877}"
-WITH_PINGGY=0
+# Default ON: after code changes we always want a fresh public URL.
+WITH_PINGGY="${Q1_RESTART_WITH_PINGGY:-1}"
 START_ARGS=()
 
 while (( $# )); do
   case "$1" in
     --with-pinggy) WITH_PINGGY=1; shift ;;
+    --no-pinggy) WITH_PINGGY=0; shift ;;
     --port)
       PORT="${2:?--port needs a value}"
       START_ARGS+=(--port "$PORT")
@@ -63,6 +65,7 @@ pkill -f "server.py --port ${PORT}" >/dev/null 2>&1 || true
 pkill -f "${Q1_STORE_ROOT}/scripts/hermes_server.sh" >/dev/null 2>&1 || true
 pkill -f "llama_cpp.server .*--port ${LLM_PORT}" >/dev/null 2>&1 || true
 pkill -f "a.pinggy.io" >/dev/null 2>&1 || true
+pkill -f "${Q1_STORE_ROOT}/scripts/pinggy.sh" >/dev/null 2>&1 || true
 kill_port "$PORT"
 kill_port "$LLM_PORT"
 sleep 1
@@ -92,7 +95,21 @@ fi
 
 if [[ "$WITH_PINGGY" -eq 1 ]]; then
   echo "starting Pinggy → :${PORT}…"
+  : >"$LOG_DIR/pinggy.log"
   nohup bash "$Q1_STORE_ROOT/scripts/pinggy.sh" "$PORT" \
-    >"$LOG_DIR/pinggy.log" 2>&1 &
-  echo "pinggy pid $! — log $LOG_DIR/pinggy.log (URL appears in that log)"
+    >>"$LOG_DIR/pinggy.log" 2>&1 &
+  echo "pinggy pid $! — log $LOG_DIR/pinggy.log"
+  PRIMARY=""
+  for _ in $(seq 1 15); do
+    PRIMARY="$(grep -Eo 'https://[a-z0-9.-]+\.free\.pinggy\.net' "$LOG_DIR/pinggy.log" 2>/dev/null | tail -1 || true)"
+    [[ -n "$PRIMARY" ]] && break
+    sleep 1
+  done
+  ALT="$(grep -Eo 'https://[a-z0-9.-]+\.run\.pinggy-free\.link' "$LOG_DIR/pinggy.log" 2>/dev/null | tail -1 || true)"
+  if [[ -n "$PRIMARY" ]]; then
+    echo "Pinggy ready: $PRIMARY"
+    [[ -n "$ALT" ]] && echo "Pinggy alt:   $ALT"
+  else
+    echo "Pinggy URL not printed yet — see $LOG_DIR/pinggy.log" >&2
+  fi
 fi
