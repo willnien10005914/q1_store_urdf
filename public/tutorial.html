@@ -54,12 +54,17 @@
     <span class="tut-layout-bar-label">三欄版面</span>
     <button type="button" class="text-link" data-layout="default" title="還原預設寬度">預設</button>
     <button type="button" class="text-link" data-layout="equal" title="左／中／右平均寬度">平均</button>
-    <button type="button" class="text-link" data-layout="expand-side" title="加寬左側課程欄">展開左欄</button>
-    <button type="button" class="text-link" data-layout="expand-main" title="加寬中間課程區">展開中欄</button>
-    <button type="button" class="text-link" data-layout="expand-agent" title="加寬右側 Hermes">展開右欄</button>
-    <span class="tut-layout-bar-hint">也可拖左右邊緣；雙擊把手可展開該欄</span>
+    <button type="button" class="text-link" data-layout="expand-side" title="加寬左側課程欄">加寬左欄</button>
+    <button type="button" class="text-link" data-layout="expand-main" title="加寬中間課程區">加寬中欄</button>
+    <button type="button" class="text-link" data-layout="expand-agent" title="加寬右側 Hermes">加寬右欄</button>
+    <span class="tut-layout-bar-sep" aria-hidden="true"></span>
+    <button type="button" class="text-link" id="toggle-side" data-pane-toggle="side" title="收合或展開左側課程欄" aria-pressed="false">收合左欄</button>
+    <button type="button" class="text-link" id="toggle-agent" data-pane-toggle="agent" title="收合或展開右側 Hermes" aria-pressed="false">收合右欄</button>
+    <span class="tut-layout-bar-hint">也可拖左右邊緣；雙擊把手可加寬該欄</span>
   </div>
 
+  <div class="tut-layout-wrap">
+  <button type="button" class="tut-collapse-rail tut-collapse-rail-side" id="rail-side" hidden title="展開左欄" aria-label="展開左欄">›</button>
   <div class="tut-layout">
     <aside class="tut-side" id="sidebar">
       <div class="tut-pane-resize tut-pane-resize-end" id="resize-side" role="separator" aria-orientation="vertical" aria-label="調整左側欄寬度" title="拖曳調整左側欄寬度"></div>
@@ -185,6 +190,8 @@
         <p class="hint">指令：/search /arxiv /youtube /fetch /params /run /code /edit /analyze /propose /remember /help。說「改 coding／改 example.py／加上 log」都會寫入中間編輯器並標黃線／`# [Hermes]`。</p>
       </div>
     </aside>
+  </div>
+  <button type="button" class="tut-collapse-rail tut-collapse-rail-agent" id="rail-agent" hidden title="展開右欄" aria-label="展開右欄">‹</button>
   </div>
 </div>
 

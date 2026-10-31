@@ -54,8 +54,24 @@
 .tut-layout-bar-label{font-weight:700;letter-spacing:.4px;color:#5c5c66;text-transform:uppercase;font-size:10px;margin-right:4px}
 .tut-layout-bar .text-link{font-size:11px}
 .tut-layout-bar .text-link.is-active{color:var(--blue);font-weight:600}
+.tut-layout-bar-sep{width:1px;height:14px;background:#e4e4ea;margin:0 2px}
 .tut-layout-bar-hint{margin-left:auto;color:#8a8a92;font-size:10px}
 .tut-page.is-code-focus .tut-layout-bar{display:none}
+.tut-layout-wrap{position:relative}
+.tut-collapse-rail{
+  position:absolute;top:50%;z-index:8;transform:translateY(-50%);
+  width:28px;min-height:72px;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);border-radius:10px;background:#fff;
+  color:#555;font-size:18px;line-height:1;cursor:pointer;
+  box-shadow:0 6px 18px rgba(20,20,30,.08);
+}
+.tut-collapse-rail:hover{color:var(--blue);border-color:#c9d7f5}
+.tut-collapse-rail[hidden]{display:none!important}
+.tut-collapse-rail-side{left:0}
+.tut-collapse-rail-agent{right:0}
+.tut-layout-wrap.is-side-collapsed{padding-left:34px}
+.tut-layout-wrap.is-agent-collapsed{padding-right:34px}
 .tut-layout{
   --tut-side-w:240px;
   --tut-agent-w:340px;
@@ -69,6 +85,8 @@
 .tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr);gap:0}
 .tut-layout.is-code-focus .tut-side,
 .tut-layout.is-code-focus .tut-agent{display:none}
+.tut-layout.is-side-collapsed .tut-side,
+.tut-layout.is-agent-collapsed .tut-agent{display:none}
 .tut-layout.is-pane-resizing{transition:none;user-select:none;cursor:col-resize}
 .tut-side,.tut-main,.tut-agent{background:#fff;border:1px solid var(--line);border-radius:16px;min-height:70vh;min-width:0}
 .tut-layout.is-code-focus .tut-main{min-height:calc(100vh - 120px);border-radius:12px}
@@ -254,9 +272,16 @@
 
 @media(max-width:1100px){
   .tut-layout-bar{display:none}
+  .tut-collapse-rail{display:none!important}
+  .tut-layout-wrap.is-side-collapsed,
+  .tut-layout-wrap.is-agent-collapsed{padding-left:0;padding-right:0}
   .tut-layout,
-  .tut-layout.is-code-editing{grid-template-columns:1fr}
+  .tut-layout.is-code-editing,
+  .tut-layout.is-side-collapsed,
+  .tut-layout.is-agent-collapsed{grid-template-columns:1fr}
   .tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr)}
+  .tut-layout.is-side-collapsed .tut-side,
+  .tut-layout.is-agent-collapsed .tut-agent{display:block}
   .tut-side,.tut-agent{position:static;max-height:none}
   .tut-lab,.tut-lab.is-editing,.tut-lab.is-wide{grid-template-columns:1fr}
   .tut-lab.is-code-collapsed{grid-template-columns:1fr}

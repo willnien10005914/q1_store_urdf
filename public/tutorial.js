@@ -28,6 +28,8 @@ function saveLayoutPrefs() {
     sideWidth: state.sideWidth,
     agentWidth: state.agentWidth,
     preset: state.layoutPreset || 'custom',
+    sideCollapsed: !!state.sideCollapsed,
+    agentCollapsed: !!state.agentCollapsed,
   }));
 }
 function loadSideFolds() {
@@ -77,6 +79,8 @@ const state = {
   sideWidth: Number(loadLayoutPrefs().sideWidth) || SIDE_DEFAULT,
   agentWidth: Number(loadLayoutPrefs().agentWidth) || AGENT_DEFAULT,
   layoutPreset: loadLayoutPrefs().preset || 'custom',
+  sideCollapsed: !!loadLayoutPrefs().sideCollapsed,
+  agentCollapsed: !!loadLayoutPrefs().agentCollapsed,
   runBusy: false,
   runId: null,
   lastRun: null,
@@ -116,40 +120,63 @@ function layoutBudget() {
 
 function paneCaps() {
   const {width, gap} = layoutBudget();
-  const usable = Math.max(MAIN_MIN + SIDE_MIN + AGENT_MIN, width - gap * 2);
+  const sideFloor = (state.sideCollapsed && !state.codeFocus) ? 0 : SIDE_MIN;
+  const agentFloor = (state.agentCollapsed && !state.codeFocus) ? 0 : AGENT_MIN;
+  const usable = Math.max(MAIN_MIN + sideFloor + agentFloor, width - gap * 2);
   // Allow either side to grow far outward; the other pane + main keep a floor.
-  const maxSide = Math.min(SIDE_MAX, Math.max(SIDE_MIN, usable - AGENT_MIN - MAIN_MIN));
-  const maxAgent = Math.min(AGENT_MAX, Math.max(AGENT_MIN, usable - SIDE_MIN - MAIN_MIN));
+  const maxSide = Math.min(SIDE_MAX, Math.max(SIDE_MIN, usable - agentFloor - MAIN_MIN));
+  const maxAgent = Math.min(AGENT_MAX, Math.max(AGENT_MIN, usable - sideFloor - MAIN_MIN));
   return {maxSide, maxAgent, usable, gap, width};
 }
 
 function applyPaneWidths() {
   const layout = layoutEl();
   const page = pageEl();
+  const wrap = document.querySelector('.tut-layout-wrap');
   if (!layout) return;
-  const {maxSide, maxAgent} = paneCaps();
-  const side = clamp(Math.round(state.sideWidth || SIDE_DEFAULT), SIDE_MIN, maxSide);
-  const agent = clamp(Math.round(state.agentWidth || AGENT_DEFAULT), AGENT_MIN, maxAgent);
-  // If both exceed the viewport, shrink the opposite of the last drag preferentially via ratio.
-  let nextSide = side;
-  let nextAgent = agent;
-  const {usable} = paneCaps();
-  if (nextSide + nextAgent + MAIN_MIN > usable) {
-    const overflow = nextSide + nextAgent + MAIN_MIN - usable;
-    const sideShare = nextSide / Math.max(1, nextSide + nextAgent);
-    nextSide = clamp(Math.round(nextSide - overflow * sideShare), SIDE_MIN, maxSide);
-    nextAgent = clamp(Math.round(usable - MAIN_MIN - nextSide), AGENT_MIN, maxAgent);
+  const sideHidden = !!state.sideCollapsed && !state.codeFocus;
+  const agentHidden = !!state.agentCollapsed && !state.codeFocus;
+  const {maxSide, maxAgent, usable} = paneCaps();
+  // Keep remembered widths even while collapsed so expand restores them.
+  let nextSide = clamp(Math.round(state.sideWidth || SIDE_DEFAULT), SIDE_MIN, maxSide);
+  let nextAgent = clamp(Math.round(state.agentWidth || AGENT_DEFAULT), AGENT_MIN, maxAgent);
+  const liveSide = sideHidden ? 0 : nextSide;
+  const liveAgent = agentHidden ? 0 : nextAgent;
+  if (liveSide + liveAgent + MAIN_MIN > usable) {
+    const overflow = liveSide + liveAgent + MAIN_MIN - usable;
+    if (!sideHidden && !agentHidden) {
+      const sideShare = nextSide / Math.max(1, nextSide + nextAgent);
+      nextSide = clamp(Math.round(nextSide - overflow * sideShare), SIDE_MIN, maxSide);
+      nextAgent = clamp(Math.round(usable - MAIN_MIN - nextSide), AGENT_MIN, maxAgent);
+    } else if (!sideHidden) {
+      nextSide = clamp(usable - MAIN_MIN, SIDE_MIN, maxSide);
+    } else if (!agentHidden) {
+      nextAgent = clamp(usable - MAIN_MIN, AGENT_MIN, maxAgent);
+    }
   }
   state.sideWidth = nextSide;
   state.agentWidth = nextAgent;
   layout.style.setProperty('--tut-side-w', `${nextSide}px`);
   layout.style.setProperty('--tut-agent-w', `${nextAgent}px`);
+  layout.classList.toggle('is-side-collapsed', sideHidden);
+  layout.classList.toggle('is-agent-collapsed', agentHidden);
+  wrap?.classList.toggle('is-side-collapsed', sideHidden);
+  wrap?.classList.toggle('is-agent-collapsed', agentHidden);
+  page?.classList.toggle('is-side-collapsed', sideHidden);
+  page?.classList.toggle('is-agent-collapsed', agentHidden);
   if (state.codeFocus) {
     layout.style.removeProperty('grid-template-columns');
+  } else if (sideHidden && agentHidden) {
+    layout.style.gridTemplateColumns = 'minmax(0,1fr)';
+  } else if (sideHidden) {
+    layout.style.gridTemplateColumns = `minmax(0,1fr) ${nextAgent}px`;
+  } else if (agentHidden) {
+    layout.style.gridTemplateColumns = `${nextSide}px minmax(0,1fr)`;
   } else {
     layout.style.gridTemplateColumns = `${nextSide}px minmax(0,1fr) ${nextAgent}px`;
   }
-  const wide = nextSide >= 360 || nextAgent >= 420 || nextSide + nextAgent >= 700;
+  const wide = (!sideHidden && nextSide >= 360) || (!agentHidden && nextAgent >= 420)
+    || ((!sideHidden ? nextSide : 0) + (!agentHidden ? nextAgent : 0) >= 700);
   page?.classList.toggle('is-wide-panes', wide && !state.codeFocus);
   syncLayoutBar();
 }
@@ -160,11 +187,47 @@ function syncLayoutBar() {
   bar.querySelectorAll('[data-layout]').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.layout === state.layoutPreset);
   });
+  const en = getLocale() === 'en';
+  const sideBtn = $('toggle-side');
+  if (sideBtn) {
+    sideBtn.textContent = state.sideCollapsed
+      ? (en ? 'Show left' : '展開左欄')
+      : (en ? 'Hide left' : '收合左欄');
+    sideBtn.title = state.sideCollapsed
+      ? (en ? 'Show the lesson sidebar' : '展開左側課程欄')
+      : (en ? 'Hide the lesson sidebar' : '收合左側課程欄');
+    sideBtn.setAttribute('aria-pressed', state.sideCollapsed ? 'true' : 'false');
+    sideBtn.classList.toggle('is-active', !!state.sideCollapsed);
+  }
+  const agentBtn = $('toggle-agent');
+  if (agentBtn) {
+    agentBtn.textContent = state.agentCollapsed
+      ? (en ? 'Show right' : '展開右欄')
+      : (en ? 'Hide right' : '收合右欄');
+    agentBtn.title = state.agentCollapsed
+      ? (en ? 'Show the Hermes panel' : '展開右側 Hermes')
+      : (en ? 'Hide the Hermes panel' : '收合右側 Hermes');
+    agentBtn.setAttribute('aria-pressed', state.agentCollapsed ? 'true' : 'false');
+    agentBtn.classList.toggle('is-active', !!state.agentCollapsed);
+  }
+  const railSide = $('rail-side');
+  if (railSide) {
+    railSide.hidden = !state.sideCollapsed || !!state.codeFocus;
+  }
+  const railAgent = $('rail-agent');
+  if (railAgent) {
+    railAgent.hidden = !state.agentCollapsed || !!state.codeFocus;
+  }
 }
 
 function setLayoutPreset(name) {
   const {usable, maxSide, maxAgent} = paneCaps();
   state.layoutPreset = name;
+  // Width presets always reopen the panes they target.
+  if (name === 'default' || name === 'equal' || name === 'expand-main') {
+    state.sideCollapsed = false;
+    state.agentCollapsed = false;
+  }
   if (name === 'default') {
     state.sideWidth = SIDE_DEFAULT;
     state.agentWidth = AGENT_DEFAULT;
@@ -173,6 +236,7 @@ function setLayoutPreset(name) {
     state.sideWidth = clamp(each, SIDE_MIN, maxSide);
     state.agentWidth = clamp(each, AGENT_MIN, maxAgent);
   } else if (name === 'expand-side') {
+    state.sideCollapsed = false;
     state.sideWidth = maxSide;
     state.agentWidth = clamp(state.agentWidth, AGENT_MIN, Math.min(maxAgent, usable - maxSide - MAIN_MIN));
   } else if (name === 'expand-main') {
@@ -181,10 +245,27 @@ function setLayoutPreset(name) {
     state.sideWidth = side;
     state.agentWidth = agent;
   } else if (name === 'expand-agent') {
+    state.agentCollapsed = false;
     state.agentWidth = maxAgent;
     state.sideWidth = clamp(state.sideWidth, SIDE_MIN, Math.min(maxSide, usable - maxAgent - MAIN_MIN));
   }
   applyPaneWidths();
+  saveLayoutPrefs();
+}
+
+function setSideCollapsed(on) {
+  state.sideCollapsed = !!on;
+  if (state.sideCollapsed) state.codeFocus = false;
+  state.layoutPreset = 'custom';
+  syncLayoutChrome();
+  saveLayoutPrefs();
+}
+
+function setAgentCollapsed(on) {
+  state.agentCollapsed = !!on;
+  if (state.agentCollapsed) state.codeFocus = false;
+  state.layoutPreset = 'custom';
+  syncLayoutChrome();
   saveLayoutPrefs();
 }
 
@@ -194,6 +275,10 @@ function wireLayoutBar() {
   bar.querySelectorAll('[data-layout]').forEach((btn) => {
     btn.addEventListener('click', () => setLayoutPreset(btn.dataset.layout));
   });
+  $('toggle-side')?.addEventListener('click', () => setSideCollapsed(!state.sideCollapsed));
+  $('toggle-agent')?.addEventListener('click', () => setAgentCollapsed(!state.agentCollapsed));
+  $('rail-side')?.addEventListener('click', () => setSideCollapsed(false));
+  $('rail-agent')?.addEventListener('click', () => setAgentCollapsed(false));
   window.addEventListener('resize', () => {
     if (state.codeFocus || window.matchMedia('(max-width: 1100px)').matches) return;
     applyPaneWidths();
@@ -275,6 +360,8 @@ function wirePaneResize() {
     let moved = false;
     handle.addEventListener('pointerdown', (e) => {
       if (state.codeFocus || window.matchMedia('(max-width: 1100px)').matches) return;
+      if (which === 'side' && state.sideCollapsed) return;
+      if (which === 'agent' && state.agentCollapsed) return;
       dragging = true;
       moved = false;
       handle.classList.add('is-active');
@@ -310,6 +397,14 @@ function wirePaneResize() {
     handle.addEventListener('dblclick', (e) => {
       e.preventDefault();
       if (state.codeFocus || window.matchMedia('(max-width: 1100px)').matches) return;
+      if (which === 'side' && state.sideCollapsed) {
+        setSideCollapsed(false);
+        return;
+      }
+      if (which === 'agent' && state.agentCollapsed) {
+        setAgentCollapsed(false);
+        return;
+      }
       setLayoutPreset(which === 'side' ? 'expand-side' : 'expand-agent');
     });
   };
@@ -352,8 +447,13 @@ function setCodeFocus(on) {
     state.codeCollapsed = false;
     document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
     document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
+  } else {
+    // 「顯示左右欄」應真正把兩側都打開。
+    state.sideCollapsed = false;
+    state.agentCollapsed = false;
   }
   syncLayoutChrome();
+  saveLayoutPrefs();
   if (state.codeFocus) $('code')?.focus({preventScroll: true});
 }
 
