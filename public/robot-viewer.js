@@ -29,8 +29,13 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
   const grid=new THREE.GridHelper(12,60,0xe0e4ea,0xe9ecf1);grid.rotation.x=Math.PI/2;grid.position.z=-.05;scene.add(grid);
   const landmarkGroup=new THREE.Group();scene.add(landmarkGroup);
   let robot=null,manifest=null,disposed=false,frame=0,last=0,playing=false,motion='stand',time=0,loadToken=0,visible=false,hasSize=false,renderingPaused=false;
-  let explodeAmount=0,explodeAnim=null,modelMaterial=null,accessoriesGroup=null;
-  const linkBase=new Map(); // link name -> {x,y,z} local rest pose for explode offsets
+  let explodeAmount=0,explodeAnim=null,modelMaterial=null,accessoriesGroup=null,plantedRootZ=0;
+  const linkBase=new Map(); // link name -> rest local position {x,y,z}
+  const linkExplodeLocal=new Map(); // link name -> parent-local unit offset direction (baked at rest)
+  const _parentInv=new THREE.Matrix4();
+  const _worldOffset=new THREE.Vector3();
+  const _tmpWorld=new THREE.Vector3();
+  const _rootWorld=new THREE.Vector3();
   const SKINS={
     steel:{color:0x8492a4,roughness:.56,metalness:.25},
     carbon:{color:0x1f2933,roughness:.35,metalness:.55},
@@ -73,13 +78,14 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
     return api;
   }
   /** Keep the lowest mesh point on the grid (z=0) so feet rest on the ground plane. */
-  function plantFeetOnGround(){
+  function plantFeetOnGround({remember=true}={}){
     if(!robot)return;
     robot.updateMatrixWorld(true);
     bounds.setFromObject(robot);
     if(bounds.isEmpty()||!Number.isFinite(bounds.min.z))return;
     robot.position.z-=bounds.min.z;
     robot.updateMatrixWorld(true);
+    if(remember)plantedRootZ=robot.position.z;
   }
   function fit(){
     if(!robot)return;robot.updateMatrixWorld(true);bounds.setFromObject(robot);
@@ -157,13 +163,15 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       robot.traverse(o=>{if(o.isMesh){for(const m of(Array.isArray(o.material)?o.material:[o.material]))if(m)oldMaterials.add(m);o.material=modelMaterial;o.castShadow=false;o.receiveShadow=false;}});
       oldMaterials.forEach(m=>m.dispose());
       robot.position.set(0,0,0);
-      captureLinkBases();
       clearAccessories();
-      setJoints(demoPose(0),{plant:true});
+      setJoints(demoPose(0),{plant:false});
       robot.updateMatrixWorld(true);bounds.setFromObject(robot);
       if(bounds.isEmpty()||!Number.isFinite(bounds.min.z)||!Number.isFinite(bounds.max.z))throw new Error(tr('原生模型的 mesh 或姿態範圍無效。','Native model mesh or pose bounds are invalid.'));
+      plantFeetOnGround({remember:true});
+      // Bake rest local poses + explode directions AFTER the standing pose is planted.
+      captureLinkBases();
+      bakeExplodeDirections();
       applyExplode(explodeAmount);
-      plantFeetOnGround();
       fit();const remain=Math.max(0,450-(performance.now()-shownAt));if(remain)await new Promise(resolve=>setTimeout(resolve,remain));if(disposed||token!==loadToken)return api;container.querySelectorAll('.loading-model').forEach(element=>element.remove());renderer.render(scene,camera);container.dataset.modelReady='true';container.dataset.robotType=entry.id;container.dataset.meshCount=String(meshLoads.length);onStatus(`${entry.name||entry.label||entry.id} · ${tr('原生 URDF 幾何預覽','native URDF geometry preview')}`);return api;
     }catch(error){if(loaded){scene.remove(loaded);disposeModel(loaded);if(loaded===robot)robot=null;}onStatus(tr('模型載入失敗：','Model load failed: ')+error.message);throw error;}
   }
@@ -177,7 +185,7 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       explodeAnim.elapsed+=delta;
       const u=Math.min(1,explodeAnim.elapsed/Math.max(0.05,explodeAnim.duration));
       const eased=0.5-0.5*Math.cos(Math.PI*u);
-      applyExplode(explodeAnim.from+(explodeAnim.to-explodeAnim.from)*eased);
+      applyExplode(explodeAnim.from+(explodeAnim.to-explodeAnim.from)*eased,{keepAnim:true});
       if(u>=1){explodeAnim=null;onStatus(tr('爆炸圖就緒','Explode view ready'));}
     }
     controls.update();renderer.render(scene,camera);
@@ -199,33 +207,64 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       linkBase.set(name,{x:link.position.x,y:link.position.y,z:link.position.z});
     }
   }
-  function applyExplode(amount=0){
-    explodeAmount=Math.max(0,Math.min(1,Number(amount)||0));
-    if(!robot?.links||!linkBase.size)return api;
-    // Reset root height before measuring directions so offsets stay stable.
-    robot.position.z=0;
-    robot.updateMatrixWorld(true);
-    const root=robot.links.center_torso_link||robot.links.center_hip_link||Object.values(robot.links)[0];
-    const rootWorld=new THREE.Vector3();
-    root?.getWorldPosition(rootWorld);
-    const tmp=new THREE.Vector3();
+  function resetLinksToBase(){
+    if(!robot?.links)return;
     for(const [name,link] of Object.entries(robot.links)){
       const base=linkBase.get(name);if(!base)continue;
-      link.getWorldPosition(tmp);
-      const dir=tmp.clone().sub(rootWorld);
-      // Prefer lateral / upward separation so feet are not driven under the ground plane.
-      if(dir.z<0)dir.z*=0.2;
-      dir.z+=0.12*Math.max(0,explodeAmount);
-      if(dir.lengthSq()<1e-8)dir.set(0,0,0.2);
-      else dir.normalize();
-      const push=dir.multiplyScalar(explodeAmount*0.55);
-      link.position.set(base.x+push.x,base.y+push.y,base.z+push.z);
+      link.position.set(base.x,base.y,base.z);
     }
-    // Assembled: feet on ground. Exploded: keep the lowest piece on the grid.
-    plantFeetOnGround();
+  }
+  /** Bake parent-local explode directions once at the assembled rest pose (stable 0→1 lerp). */
+  function bakeExplodeDirections(){
+    linkExplodeLocal.clear();
+    if(!robot?.links||!linkBase.size)return;
+    resetLinksToBase();
+    robot.position.z=plantedRootZ;
+    robot.updateMatrixWorld(true);
+    const root=robot.links.center_torso_link||robot.links.center_hip_link||Object.values(robot.links)[0];
+    root?.getWorldPosition(_rootWorld);
+    for(const [name,link] of Object.entries(robot.links)){
+      if(!linkBase.has(name))continue;
+      link.getWorldPosition(_tmpWorld);
+      _worldOffset.copy(_tmpWorld).sub(_rootWorld);
+      // Prefer lateral / slight upward separation; damp downward so feet don't dive.
+      if(_worldOffset.z<0)_worldOffset.z*=0.2;
+      _worldOffset.z+=0.1;
+      if(_worldOffset.lengthSq()<1e-10)_worldOffset.set(0,0,0.25);
+      else _worldOffset.normalize();
+      // Convert world-space unit direction into the link parent's local axes.
+      if(link.parent){
+        _parentInv.copy(link.parent.matrixWorld).invert();
+        _worldOffset.transformDirection(_parentInv);
+      }
+      if(_worldOffset.lengthSq()<1e-10)_worldOffset.set(0,0,0.25);
+      else _worldOffset.normalize();
+      linkExplodeLocal.set(name,{x:_worldOffset.x,y:_worldOffset.y,z:_worldOffset.z});
+    }
+  }
+  function applyExplode(amount=0,{keepAnim=false}={}){
+    if(!keepAnim)explodeAnim=null; // scrubbing the slider cancels an in-flight animation
+    explodeAmount=Math.max(0,Math.min(1,Number(amount)||0));
+    if(!robot?.links||!linkBase.size)return api;
+    if(!linkExplodeLocal.size)bakeExplodeDirections();
+    // Always start from the assembled rest pose, then lerp a fixed local offset.
+    // (Previously directions were recomputed from already-exploded world poses → center jumped.)
+    resetLinksToBase();
+    const scale=explodeAmount*0.55;
+    if(scale>1e-6){
+      for(const [name,link] of Object.entries(robot.links)){
+        const base=linkBase.get(name);const dir=linkExplodeLocal.get(name);
+        if(!base||!dir)continue;
+        link.position.set(base.x+dir.x*scale,base.y+dir.y*scale,base.z+dir.z*scale);
+      }
+    }
+    // Keep root Z locked to the planted standing height (plus a tiny float when open).
+    // Re-running plantFeetOnGround() each frame made the whole model hop as AABB changed.
+    robot.position.z=plantedRootZ+explodeAmount*0.04;
     return api;
   }
   function animateExplode(to=0.85,{duration=1.2,from=explodeAmount}={}){
+    if(!linkExplodeLocal.size)bakeExplodeDirections();
     explodeAnim={from:Number(from)||0,to:Math.max(0,Math.min(1,Number(to)||0)),elapsed:0,duration:Math.max(0.2,Number(duration)||1.2)};
     onStatus(tr('播放爆炸圖…','Playing explode…'));
     return api;

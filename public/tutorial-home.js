@@ -95,18 +95,59 @@ function renderMega(catalog, robot) {
   if (badge) { badge.hidden = !n; badge.textContent = String(n); }
 }
 
-/** Slow marquee: ~12 px/s so ticker text stays readable instead of flashing past. */
-function syncTickerSpeed(scrollEl) {
-  if (!scrollEl) return;
-  requestAnimationFrame(() => {
-    const track = scrollEl.parentElement;
-    const half = Math.max(scrollEl.scrollWidth / 2, track?.clientWidth || 320, 240);
-    const seconds = Math.min(360, Math.max(90, half / 12));
-    scrollEl.style.setProperty('--tut-marquee-duration', `${seconds.toFixed(1)}s`);
-    scrollEl.style.animation = 'none';
-    void scrollEl.offsetWidth;
-    scrollEl.style.animation = '';
-  });
+/**
+ * JS-driven ticker (not CSS % keyframes). CSS translateX(-50%) remounts/remeasures
+ * made the strip flash; drive a fixed ~28 px/s pixel crawl instead.
+ */
+const homeTickerMotion = {raf: 0, x: 0, half: 0, last: 0, sig: '', el: null, paused: false};
+
+function measureHomeTickerHalf(scrollEl) {
+  const kids = [...scrollEl.children];
+  if (kids.length >= 2 && kids.length % 2 === 0) {
+    const mid = kids.length / 2;
+    let w = 0;
+    for (let i = 0; i < mid; i++) w += kids[i].offsetWidth;
+    const style = getComputedStyle(scrollEl);
+    const gap = parseFloat(style.columnGap || style.gap || '0') || 0;
+    w += gap * mid;
+    return Math.max(w, 1);
+  }
+  return Math.max(scrollEl.scrollWidth / 2, 1);
+}
+
+function tickHomeTicker(now) {
+  const el = homeTickerMotion.el;
+  if (!el || !el.isConnected) {
+    if (homeTickerMotion.raf) cancelAnimationFrame(homeTickerMotion.raf);
+    homeTickerMotion.raf = 0;
+    return;
+  }
+  homeTickerMotion.raf = requestAnimationFrame(tickHomeTicker);
+  if (homeTickerMotion.paused || document.hidden) { homeTickerMotion.last = now; return; }
+  const dt = homeTickerMotion.last ? Math.min(0.05, (now - homeTickerMotion.last) / 1000) : 0;
+  homeTickerMotion.last = now;
+  if (!homeTickerMotion.half) return;
+  homeTickerMotion.x -= 28 * dt;
+  if (homeTickerMotion.x <= -homeTickerMotion.half) homeTickerMotion.x += homeTickerMotion.half;
+  el.style.transform = `translate3d(${homeTickerMotion.x.toFixed(2)}px,0,0)`;
+}
+
+function startHomeTickerMotion(scrollEl, {reset = false} = {}) {
+  homeTickerMotion.el = scrollEl;
+  homeTickerMotion.half = measureHomeTickerHalf(scrollEl);
+  if (reset) homeTickerMotion.x = 0;
+  while (homeTickerMotion.x <= -homeTickerMotion.half) homeTickerMotion.x += homeTickerMotion.half;
+  scrollEl.style.transform = `translate3d(${homeTickerMotion.x.toFixed(2)}px,0,0)`;
+  if (!homeTickerMotion.raf) {
+    homeTickerMotion.last = 0;
+    homeTickerMotion.raf = requestAnimationFrame(tickHomeTicker);
+  }
+  const track = scrollEl.parentElement;
+  if (track && !track.dataset.tickerHoverBound) {
+    track.dataset.tickerHoverBound = '1';
+    track.addEventListener('pointerenter', () => { homeTickerMotion.paused = true; });
+    track.addEventListener('pointerleave', () => { homeTickerMotion.paused = false; homeTickerMotion.last = 0; });
+  }
 }
 
 async function renderTicker() {
@@ -115,13 +156,19 @@ async function renderTicker() {
     const scroll = document.getElementById('home-ticker-scroll');
     if (!scroll) return;
     const items = data.items?.length ? data.items : [{text: getLocale()==='en'?'Enable Hermes discovery in the tutorial.':'到 Tutorial 開啟 Hermes 搜尋進修。'}];
+    const sig = items.map((it) => it.text || it.proposal_id || it.lesson_id || '').join('|');
     const html = items.map((it) => {
       if (it.proposal_id) return `<a href="/tutorial#proposal-${it.proposal_id}">${escapeHtml(it.text)}</a>`;
       if (it.lesson_id) return `<a href="/tutorial#${it.lesson_id}">${escapeHtml(it.text)}</a>`;
       return `<span>${escapeHtml(it.text)}</span>`;
     }).join('');
-    scroll.innerHTML = html + html;
-    syncTickerSpeed(scroll);
+    if (sig !== homeTickerMotion.sig) {
+      homeTickerMotion.sig = sig;
+      scroll.innerHTML = html + html;
+      requestAnimationFrame(() => startHomeTickerMotion(scroll, {reset: true}));
+    } else if (!homeTickerMotion.raf) {
+      requestAnimationFrame(() => startHomeTickerMotion(scroll));
+    }
     const count = document.getElementById('home-ticker-count');
     const n = data.counts?.pending || 0;
     if (count) { count.hidden = !n; count.textContent = n + (getLocale()==='en'?' pending':' 待審'); }

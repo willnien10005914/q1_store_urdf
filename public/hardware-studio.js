@@ -21,14 +21,15 @@ function readParam(key, fallback) {
   return el.value ?? fallback;
 }
 
-function writeParam(key, value) {
+function writeParam(key, value, {silent = false} = {}) {
   const el = document.querySelector(`#params [data-param="${key}"]`);
   if (!el) return;
   if (el.type === 'checkbox') el.checked = !!value;
   else el.value = value;
   const out = document.querySelector(`#params [data-out="${key}"]`);
   if (out) out.textContent = String(value);
-  el.dispatchEvent(new Event('input', {bubbles: true}));
+  // silent: update the slider without re-entering setExplode (would cancel/jump the animation).
+  if (!silent) el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
 function configFromParams() {
@@ -108,8 +109,9 @@ export function createHardwareStudio(host, {ensureRobotManifest, getRobotId, onS
     });
     if (animate) {
       const target = explodeTo ?? Math.max(0.55, Number(cfg.explode) || 0.85);
-      writeParam('explode_amount', target);
-      viewer.animateExplode(target, {duration: 1.35, from: viewer.getExplode?.() || 0});
+      const from = viewer.getExplode?.() || 0;
+      writeParam('explode_amount', target, {silent: true});
+      viewer.animateExplode(target, {duration: 1.35, from});
     }
   }
 
@@ -122,8 +124,9 @@ export function createHardwareStudio(host, {ensureRobotManifest, getRobotId, onS
     applyAll({animate: true, explodeTo: target});
   });
   $('#hw-assemble', host)?.addEventListener('click', () => {
-    writeParam('explode_amount', 0);
-    viewer?.animateExplode(0, {duration: 0.9, from: viewer.getExplode?.() || 0});
+    const from = viewer?.getExplode?.() || 0;
+    writeParam('explode_amount', 0, {silent: true});
+    viewer?.animateExplode(0, {duration: 0.9, from});
     setStatus(en() ? 'Assembling…' : '重組中…');
   });
 

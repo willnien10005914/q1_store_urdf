@@ -725,20 +725,65 @@ function renderMega() {
   if (badge) { badge.hidden = !n; badge.textContent = String(n); }
 }
 
-/** Slow marquee: ~12 px/s so ticker text stays readable instead of flashing past. */
-function syncTickerSpeed(scrollEl) {
-  if (!scrollEl) return;
-  requestAnimationFrame(() => {
-    const track = scrollEl.parentElement;
-    const half = Math.max(scrollEl.scrollWidth / 2, track?.clientWidth || 320, 240);
-    // Floor 90s / cap 360s — intentionally slow even for short copy.
-    const seconds = Math.min(360, Math.max(90, half / 12));
-    scrollEl.style.setProperty('--tut-marquee-duration', `${seconds.toFixed(1)}s`);
-    // Restart animation cleanly after duration change.
-    scrollEl.style.animation = 'none';
-    void scrollEl.offsetWidth;
-    scrollEl.style.animation = '';
-  });
+/**
+ * JS-driven ticker (not CSS % keyframes).
+ * CSS translateX(-50%) + flex shrink/remeasure caused the strip to jump/flash;
+ * duration tweaks could not fix that. Drive pixels at a fixed slow speed instead.
+ */
+const tickerMotion = {raf: 0, x: 0, half: 0, last: 0, sig: '', el: null, paused: false};
+
+function stopTickerMotion() {
+  if (tickerMotion.raf) cancelAnimationFrame(tickerMotion.raf);
+  tickerMotion.raf = 0;
+  tickerMotion.last = 0;
+}
+
+function measureTickerHalf(scrollEl) {
+  // Content is rendered twice side-by-side; half is one full loop length.
+  const kids = [...scrollEl.children];
+  if (kids.length >= 2 && kids.length % 2 === 0) {
+    const mid = kids.length / 2;
+    let w = 0;
+    for (let i = 0; i < mid; i++) w += kids[i].offsetWidth;
+    // include flex gaps between the first half items (+ one gap before the duplicate)
+    const style = getComputedStyle(scrollEl);
+    const gap = parseFloat(style.columnGap || style.gap || '0') || 0;
+    w += gap * mid;
+    return Math.max(w, 1);
+  }
+  return Math.max(scrollEl.scrollWidth / 2, 1);
+}
+
+function tickTickerMotion(now) {
+  const el = tickerMotion.el;
+  if (!el || !el.isConnected) { stopTickerMotion(); return; }
+  tickerMotion.raf = requestAnimationFrame(tickTickerMotion);
+  if (tickerMotion.paused || document.hidden) { tickerMotion.last = now; return; }
+  const dt = tickerMotion.last ? Math.min(0.05, (now - tickerMotion.last) / 1000) : 0;
+  tickerMotion.last = now;
+  if (!tickerMotion.half) return;
+  // ~28 px/s — slow crawl; independent of content length.
+  tickerMotion.x -= 28 * dt;
+  if (tickerMotion.x <= -tickerMotion.half) tickerMotion.x += tickerMotion.half;
+  el.style.transform = `translate3d(${tickerMotion.x.toFixed(2)}px,0,0)`;
+}
+
+function startTickerMotion(scrollEl, {reset = false} = {}) {
+  tickerMotion.el = scrollEl;
+  tickerMotion.half = measureTickerHalf(scrollEl);
+  if (reset) tickerMotion.x = 0;
+  while (tickerMotion.x <= -tickerMotion.half) tickerMotion.x += tickerMotion.half;
+  scrollEl.style.transform = `translate3d(${tickerMotion.x.toFixed(2)}px,0,0)`;
+  if (!tickerMotion.raf) {
+    tickerMotion.last = 0;
+    tickerMotion.raf = requestAnimationFrame(tickTickerMotion);
+  }
+  const track = scrollEl.parentElement;
+  if (track && !track.dataset.tickerHoverBound) {
+    track.dataset.tickerHoverBound = '1';
+    track.addEventListener('pointerenter', () => { tickerMotion.paused = true; });
+    track.addEventListener('pointerleave', () => { tickerMotion.paused = false; tickerMotion.last = 0; });
+  }
 }
 
 async function updateTicker() {
@@ -746,17 +791,24 @@ async function updateTicker() {
     const data = await api('/api/tutorial/ticker');
     const scroll = $('ticker-scroll');
     const items = data.items?.length ? data.items : [{text: getLocale()==='en'?'No new suggestions yet.':'尚無新建議。'}];
+    const sig = items.map((it) => it.text || it.proposal_id || it.lesson_id || '').join('|');
     const html = items.map((it) => {
       if (it.proposal_id) return `<a href="#proposal-${it.proposal_id}" data-proposal="${it.proposal_id}">${escapeHtml(it.text)}</a>`;
       if (it.lesson_id) return `<a href="#${it.lesson_id}">${escapeHtml(it.text)}</a>`;
       return `<span>${escapeHtml(it.text)}</span>`;
     }).join('');
-    scroll.innerHTML = html + html;
-    scroll.querySelectorAll('[data-proposal]').forEach((a) => a.addEventListener('click', (e) => {
-      e.preventDefault();
-      showProposal(a.dataset.proposal);
-    }));
-    syncTickerSpeed(scroll);
+    if (sig !== tickerMotion.sig) {
+      tickerMotion.sig = sig;
+      scroll.innerHTML = html + html;
+      scroll.querySelectorAll('[data-proposal]').forEach((a) => a.addEventListener('click', (e) => {
+        e.preventDefault();
+        showProposal(a.dataset.proposal);
+      }));
+      // Wait a frame so widths are real, then start pixel crawl (reset only on content change).
+      requestAnimationFrame(() => startTickerMotion(scroll, {reset: true}));
+    } else if (!tickerMotion.raf) {
+      requestAnimationFrame(() => startTickerMotion(scroll));
+    }
     const count = $('ticker-count');
     const n = data.counts?.pending || 0;
     count.hidden = !n;
