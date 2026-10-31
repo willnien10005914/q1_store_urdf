@@ -56,8 +56,10 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"facts": {"type": "array", "items": {"type": "string"}}}, "required": ["facts"]}},
 ]
 REPAIR_HINT = re.compile(
-    r"修|錯誤|失败|失敗|error|traceback|runtimeerror|cuda|driver|blocked|fix|repair|fail|"
-    r"physxjointapi|physxschema|add_joint_schemas|applyapi",
+    # Do NOT match 修改／改 coding, and do NOT match incidental "cuda:0" inside pasted example.py.
+    r"修復|修好|修一下|請修(?!改)|幫我修(?!改)|錯誤|失败|失敗|traceback|runtimeerror|"
+    r"(cuda|driver).{0,16}(錯誤|error|fail|不符|mismatch|太舊|too old)|"
+    r"\bfix\b|\brepair\b|physxjointapi|physxschema|add_joint_schemas|applyapi",
     re.I,
 )
 ANALYZE_HINT = re.compile(
@@ -69,18 +71,26 @@ ANALYZE_HINT = re.compile(
     re.I,
 )
 EDIT_HINT = re.compile(
-    r"(加\s*(上)?\s*(log|print|logging|日誌|除錯|debug)|"
+    r"("
+    r"加\s*(上)?\s*(log|print|logging|日誌|除錯|debug)|"
     r"加上?.{0,8}(log|print|logging|日誌)|"
     r"(insert|add)\s+(more\s+)?(log|print|logging)|"
-    r"(改|修改|編輯|更新).{0,16}(example\.py|程式|code|範例)|"
-    r"(幫我|請).{0,8}(改|加|寫).{0,16}(log|print|日誌|程式|code)|"
-    r"/edit|/logcode)",
+    r"(改|修改|編輯|更新|調整|重寫|改寫|刪除|替換|加上|插入).{0,28}"
+    r"(example\.py|程式碼?|coding|code|範例|源碼|腳本|script)|"
+    r"(幫我|請|麻煩).{0,12}(改|寫|加|刪|調|編輯|更新).{0,28}"
+    r"(example\.py|程式碼?|coding|code|範例|這堂課|課程)|"
+    r"(課程|這堂課|lesson).{0,12}(coding|code|程式|範例).{0,12}(改|修改|編輯|更新)|"
+    r"改一下\s*(code|coding|程式|example)|"
+    r"\b(edit|change|update|modify)\b.{0,24}\b(example\.py|code|coding|script)\b|"
+    r"/edit|/logcode"
+    r")",
     re.I,
 )
 LOG_EDIT_HINT = re.compile(
     r"(log|print|logging|日誌|除錯|debug|progress\.json|run\.log)",
     re.I,
 )
+FENCED_PY_RE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.I | re.S)
 PHYSX_HINT = re.compile(r"physxjointapi|physxschema|add_joint_schemas|cannot find a valid schema", re.I)
 TAG_RE = re.compile(r"<think>|</think>|<tool_call>|</tool_call>")
 
@@ -264,27 +274,84 @@ class Agent:
         # Slash commands + repair/analyze intents must run real tools. The 8B Hermes GGUF often
         # ignores <tool_call> and just asks for more info — never let that block fixes or result review.
         cmd = message.split(None, 1)[0] if message else ""
-        wants_analyze = bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message)) and not bool(EDIT_HINT.search(message))
-        wants_edit = bool(EDIT_HINT.search(message)) and not bool(REPAIR_HINT.search(message))
-        force_tools = (
-            cmd.startswith("/")
-            or bool(REPAIR_HINT.search(message))
-            or wants_analyze
-            or wants_edit
+        # Coding-edit intents win over repair/analyze so pasted example.py (which may contain
+        # "cuda:0") still lands in the Lab editor via apply_code — not only 「加 log」.
+        wants_edit = cmd in ("/edit", "/logcode") or bool(EDIT_HINT.search(message))
+        wants_analyze = (
+            bool(ANALYZE_HINT.search(message))
+            and not wants_edit
+            and not bool(REPAIR_HINT.search(message))
         )
+        if wants_edit:
+            yield from self._edit_chat(uid, lesson, context, message)
+            return
+        force_tools = cmd.startswith("/") or bool(REPAIR_HINT.search(message)) or wants_analyze
         if force_tools:
-            if wants_edit or cmd in ("/edit", "/logcode"):
-                note = "以工具模式修改 example.py（加 log／編輯會寫入中間 Lab 編輯器並標註 Hermes）。"
-            elif wants_analyze or cmd in ("/analyze", "/result"):
-                note = "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。"
-            else:
-                note = "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。"
+            note = (
+                "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。"
+                if wants_analyze or cmd in ("/analyze", "/result")
+                else "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。"
+            )
             yield from OfflineTutor(self).respond(uid, lesson, context, message, note=note)
             return
         if self.llm is not None and self.llm.chat_ready():
             yield from self._hermes(uid, lesson, context, message)
         else:
             yield from OfflineTutor(self).respond(uid, lesson, context, message)
+
+    def _edit_chat(self, uid, lesson, context, message):
+        """Route code-edit requests so the middle Lab pane always receives an apply_code event."""
+        cmd = message.split(None, 1)[0] if message else ""
+        log_intent = bool(LOG_EDIT_HINT.search(message)) or cmd == "/logcode"
+        if log_intent or not (self.llm is not None and self.llm.chat_ready()):
+            yield from OfflineTutor(self).respond(
+                uid, lesson, context, message,
+                note="以工具模式修改 example.py（會寫入中間 Lab 編輯器並標註 Hermes）。",
+            )
+            return
+        nudge = (
+            "\n\n[REQUIRED] The learner asked to change this lesson's example.py / coding. "
+            "You MUST call apply_code now with the COMPLETE updated example.py (full file). "
+            "Do not only describe the edit. The middle Lab editor updates only via apply_code; "
+            "yellow Hermes marks and # [Hermes] notes will show who changed it."
+        )
+        applied = False
+        final_bits = []
+        for ev in self._hermes(uid, lesson, context, message + nudge):
+            if ev.get("type") == "code_apply":
+                applied = True
+            if ev.get("type") == "token":
+                final_bits.append(ev.get("text") or "")
+            # Skip the premature done from _hermes if we still need a fallback apply.
+            if ev.get("type") == "done" and not applied:
+                continue
+            yield ev
+            if ev.get("type") == "done":
+                return
+        if applied:
+            return
+        # Model talked about the edit but skipped the tool — recover from fenced python or offline log inject.
+        current = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
+        fenced = extract_fenced_python("".join(final_bits)) or extract_fenced_python(message)
+        if fenced and fenced.strip() and fenced.strip() != (current or "").strip():
+            yield {"type": "status", "text": "Hermes 未呼叫 apply_code，改從回覆中的程式碼區塊套用到 Lab 編輯器。", "mode": "hermes"}
+            result, events = self.run_tool(
+                uid, lesson, context, "apply_code",
+                {"code": fenced, "explanation": "從對話中的程式碼區塊套用（Hermes 漏呼叫工具時的後備）。"},
+            )
+            for e in events:
+                yield e
+            yield {"type": "tool_result", "name": "apply_code", "result": self.summarize(result)}
+            text = "已將修改寫入中間 Lab／example.py（黃線＝Hermes）。請檢查後按「執行」。"
+            for chunk in re.findall(r".{1,120}(?:\s|$)", text, re.S) or [text]:
+                yield {"type": "token", "text": chunk}
+            saved = self.t.append_message(uid, lesson["id"], "assistant", text, mode="hermes")
+            yield {"type": "done", "message_id": saved["id"], "mode": "hermes"}
+            return
+        yield from OfflineTutor(self).respond(
+            uid, lesson, context, message,
+            note="LLM 未套用程式碼，改用離線編輯流程寫入 Lab 編輯器。",
+        )
 
     def _hermes(self, uid, lesson, context, message):
         msgs = self.messages(uid, lesson, context, message)
@@ -745,12 +812,10 @@ class OfflineTutor:
         cmd, _, rest = lowered.partition(" ")
         last_err = f"{(context.get('last_run') or {}).get('error') or ''} {(context.get('last_run') or {}).get('log_tail') or ''}"
         wants_fix = bool(REPAIR_HINT.search(message)) or bool((context.get("last_run") or {}).get("error"))
+        wants_edit = cmd in ("/edit", "/logcode") or bool(EDIT_HINT.search(message))
         wants_analyze = (
             cmd in ("/analyze", "/result")
-            or (bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message)) and not bool(EDIT_HINT.search(message)))
-        )
-        wants_edit = cmd in ("/edit", "/logcode") or (
-            bool(EDIT_HINT.search(message)) and not bool(REPAIR_HINT.search(message))
+            or (bool(ANALYZE_HINT.search(message)) and not wants_edit and not bool(REPAIR_HINT.search(message)))
         )
         physx_in_msg = bool(PHYSX_HINT.search(message)) or bool(PHYSX_HINT.search(last_err))
         # /code PhysxJointAPI must not become「example.py 裡沒有這個字串」— route to repair.
@@ -908,12 +973,31 @@ class OfflineTutor:
         if not current.strip():
             answer_parts.append("目前沒有 example.py 可改。")
             return
-        # Offline deterministic edit: instrument progress/phase logs (esp. 「加 log」on l01).
-        reasoning.append("在 example.py 加上 progress／階段 print log，並套用到 Lab 編輯器")
+        cmd = (message or "").split(None, 1)[0]
+        log_intent = bool(LOG_EDIT_HINT.search(message or "")) or cmd == "/logcode"
+        new_code, note = None, ""
+
+        fenced = extract_fenced_python(message or "")
+        if fenced and fenced.strip() and fenced.strip() != current.strip():
+            reasoning.append("從訊息中的 ```python``` 區塊套用完整 example.py")
+            new_code, note = fenced, "依對話貼上的程式碼區塊更新 example.py"
+        elif log_intent or cmd in ("/edit", "/logcode"):
+            reasoning.append("在 example.py 加上 progress／階段 print log，並套用到 Lab 編輯器")
+            new_code, note = inject_progress_logging(current, lesson_id=lesson.get("id") or "")
+        else:
+            reasoning.append("依對話意圖對 example.py 做可判定的修改並套用到 Lab 編輯器")
+            new_code, note = apply_simple_code_intent(current, message or "", lesson_id=lesson.get("id") or "")
+            if new_code == current:
+                # Still give a visible Hermes touch so the middle pane reflects the edit request.
+                new_code, note = inject_edit_request_marker(current, message or "", lesson_id=lesson.get("id") or "")
+
         yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
-        new_code, note = inject_progress_logging(current, lesson_id=lesson.get("id") or "")
-        if new_code == current:
-            answer_parts.append("程式裡已有 Hermes／進度 log，沒有再改。若要別種修改，請具體說要改哪一段。")
+        if not new_code or new_code == current:
+            answer_parts.append(
+                "還無法從這句話判定要改哪一段。請貼上完整 `example.py` 的 ```python``` 區塊，"
+                "或更具體地說要改的變數／行為（例如「把 sim_seconds 預設改成 5」）；"
+                "一有明確內容就會寫入中間 Lab 編輯器並標 `# [Hermes]`。"
+            )
             return
         args = {"code": new_code, "explanation": note}
         yield {"type": "tool_call", "name": "apply_code", "arguments": {"explanation": note}}
@@ -1052,6 +1136,88 @@ class OfflineTutor:
                 "要加 log／改 example.py 請說「加上 log」或 `/edit`（會寫入中間編輯器並標註 Hermes）。"
             )
         return "\n".join(lines)
+
+
+def extract_fenced_python(text: str) -> str | None:
+    """Return the largest ```python``` / ``` fence body, if any."""
+    if not text:
+        return None
+    blocks = [m.group(1).strip("\n") for m in FENCED_PY_RE.finditer(text)]
+    if not blocks:
+        return None
+    blocks.sort(key=len, reverse=True)
+    body = blocks[0]
+    # Ignore tiny snippets that are clearly not a full example.py
+    if body.count("\n") < 5 and "def " not in body and "import " not in body:
+        return None
+    return body + ("\n" if not body.endswith("\n") else "")
+
+
+def apply_simple_code_intent(code: str, message: str, lesson_id: str = "") -> tuple[str, str]:
+    """Best-effort offline edits: assignment changes like 把 sim_seconds 改成 5."""
+    if not code or not message:
+        return code, ""
+    # 把 foo 改成 5 / set foo to 5 / foo=5 in the request targeting example.py values
+    patterns = [
+        re.compile(
+            r"(?:把|將)?\s*[`'\"]?([A-Za-z_][\w]*)[`'\"]?\s*"
+            r"(?:改成|改為|設為|設成|设置成|設置成|=|to)\s*[`'\"]?([^`'\",，。\s]+)[`'\"]?",
+            re.I,
+        ),
+        re.compile(r"\b([A-Za-z_][\w]*)\s*=\s*([^\s,，。]+)"),
+    ]
+    text = code
+    notes = []
+    for pat in patterns:
+        for key, raw in pat.findall(message):
+            if key in ("example", "py", "code", "coding", "log", "print"):
+                continue
+            val = raw.strip().rstrip("。.;；")
+            # Prefer P.get("key", default) default replacement
+            def_repl = re.compile(
+                rf'(P\.get\(\s*[\'"]{re.escape(key)}[\'"]\s*,\s*)([^)]+)(\))'
+            )
+            if def_repl.search(text):
+                text2, n = def_repl.subn(rf"\g<1>{val}\3", text, count=1)
+                if n:
+                    text = text2
+                    notes.append(f"P.get('{key}', …) → {val}")
+                    continue
+            # Module-level KEY = ...
+            assign = re.compile(rf'^(\s*{re.escape(key)}\s*=\s*)([^\n]+)$', re.M)
+            if assign.search(text):
+                text2, n = assign.subn(rf"\g<1>{val}", text, count=1)
+                if n:
+                    text = text2
+                    notes.append(f"{key} = {val}")
+    if text == code:
+        return code, ""
+    note = f"Hermes 依對話調整 {lesson_id or 'example.py'}：" + "；".join(notes)
+    return text, note
+
+
+def inject_edit_request_marker(code: str, message: str, lesson_id: str = "") -> tuple[str, str]:
+    """Ensure an edit request still lands in the editor with Hermes attribution."""
+    if not code:
+        return code, ""
+    summary = re.sub(r"\s+", " ", (message or "").strip())[:120]
+    marker = f"# [Hermes] 對話修改請求：{summary}"
+    if marker in code or "# [Hermes] 對話修改請求：" in code:
+        return code, "already marked"
+    lines = code.splitlines(True)
+    insert_at = 0
+    if lines and lines[0].startswith("#!"):
+        insert_at = 1
+    if insert_at < len(lines) and lines[insert_at].startswith('"""'):
+        # After module docstring
+        j = insert_at + 1
+        while j < len(lines) and '"""' not in lines[j]:
+            j += 1
+        if j < len(lines):
+            insert_at = j + 1
+    lines.insert(insert_at, marker + "\n")
+    note = f"已在 {lesson_id or 'example.py'} 標註 Hermes 修改請求；請補充具體改法或貼上完整程式碼以便覆寫。"
+    return "".join(lines), note
 
 
 def inject_progress_logging(code: str, lesson_id: str = "") -> tuple[str, str]:

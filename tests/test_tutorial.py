@@ -11,7 +11,10 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from q1store.agent import Agent, OfflineTutor, TagStreamer, inject_progress_logging, EDIT_HINT
+from q1store.agent import (
+    Agent, OfflineTutor, TagStreamer, inject_progress_logging, EDIT_HINT, REPAIR_HINT,
+    apply_simple_code_intent, extract_fenced_python,
+)
 from q1store.llm import LLMManager, MODELS
 from q1store.service import Store
 from q1store.tutorial import Tutorial, parse_front_matter, dump_front_matter
@@ -253,6 +256,33 @@ class AgentTests(unittest.TestCase):
         self.assertIn("[hermes-log]", apply.get("code") or "")
         draft = self.t.progress_row(self.uid, lesson["id"]).get("draft_code") or ""
         self.assertIn("[hermes-log]", draft)
+
+    def test_any_coding_edit_applies_not_only_log(self):
+        # 「修改」must be EDIT, not REPAIR (bare 修 used to steal these).
+        self.assertTrue(EDIT_HINT.search("請修改這堂課的 coding"))
+        self.assertFalse(REPAIR_HINT.search("請修改這堂課的 coding"))
+        self.assertTrue(REPAIR_HINT.search("請修復執行錯誤"))
+        lesson = self.t.lesson("l01-isaaclab3-overview", robot="leg", user_id=self.uid)
+        code = (ROOT / "tutorials/lessons/l01-isaaclab3-overview/example.py").read_text()
+        edited, note = apply_simple_code_intent(code, "請修改課程 coding，把 sim_seconds 改成 5", lesson["id"])
+        self.assertIn("5", note + edited)
+        self.assertNotEqual(edited, code)
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "請修改這堂課的 coding，把 sim_seconds 改成 5",
+            {"robot": "leg", "params": {}, "code": code},
+        ))
+        apply = next(e for e in events if e.get("type") == "code_apply")
+        self.assertEqual(apply.get("author"), "Hermes")
+        self.assertRegex(apply["code"], r'P\.get\([\'"]sim_seconds[\'"],\s*5')
+        # Fenced full-file paste also applies.
+        fenced = "```python\n" + edited + "\n```"
+        self.assertTrue(extract_fenced_python(fenced))
+        events2 = list(self.agent.chat(
+            self.uid, lesson["id"], "請改 example.py：\n" + fenced,
+            {"robot": "leg", "params": {}, "code": code},
+        ))
+        apply2 = next(e for e in events2 if e.get("type") == "code_apply")
+        self.assertRegex(apply2["code"], r'P\.get\([\'"]sim_seconds[\'"],\s*5')
 
 
 class TutorialHTTPTests(unittest.TestCase):
