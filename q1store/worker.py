@@ -1,6 +1,7 @@
-"""Spark GPU worker: turns queued store jobs into real Isaac Lab PPO runs.
+"""Local GPU worker: turns queued store jobs into real Isaac Lab PPO runs.
 
-Runs beside the web service as its own process (``scripts/worker.sh``). Every
+Runs beside the web service as its own process (``scripts/worker.sh``) on any
+host with NVIDIA + Isaac Sim / Isaac Lab (DGX Spark, x86 Intel + RTX, …). Every
 state transition is written to the shared SQLite store and to
 ``.data/jobs/<id>/``, so the web service, Pinggy tunnel and even this worker
 can restart without losing the training record or its result.
@@ -18,11 +19,12 @@ import sys
 import time
 from pathlib import Path
 
+from .paths import host_platform_info, resolve_gpu_lock, resolve_leg_root, with_isaac_ld_library_path
 from .service import Store, num_envs_for_hours
 
 RUNNING_STATES = ("preparing", "waiting_for_gpu", "starting_isaac", "training", "evaluating", "recording")
 STAGE_LABELS = {
-    "queued_for_worker": "等待 Spark GPU worker", "preparing": "整理關節參考與工作目錄", "waiting_for_gpu": "等待 GPU（其他訓練持有鎖）",
+    "queued_for_worker": "等待 GPU worker", "preparing": "整理關節參考與工作目錄", "waiting_for_gpu": "等待 GPU（其他訓練持有鎖）",
     "starting_isaac": "啟動 Isaac Sim / Isaac Lab", "training": "Isaac Lab PPO 訓練中", "evaluating": "評估策略（32 回合）",
     "recording": "錄製結果影片與 rollout", "complete": "訓練完成", "failed": "訓練失敗", "cancelled": "工作已取消",
 }
@@ -91,8 +93,9 @@ class Worker:
         self.store = Store(root, data_dir, clock=clock)
         self.clock = clock
         self.root = self.store.root
-        self.leg_root = Path(leg_root or os.environ.get("Q1_LEG_ROOT") or Path.home() / "will/q1_leg_urdf").resolve()
-        self.lock_path = Path(os.environ.get("Q1_GPU_LOCK") or self.leg_root.parent / ".spark-training-gpu.lock")
+        self.leg_root = resolve_leg_root(self.root, leg_root)
+        self.lock_path = resolve_gpu_lock(self.leg_root, self.store.data_dir)
+        self.host = host_platform_info()
         # Env count comes from the job's hour schedule (4 h = 1024, +1024 per extra hour).
         # A stale Q1_WORKER_NUM_ENVS or --num-envs must not force every job back to 2048.
         self.num_envs_override = int(num_envs) if num_envs else None
@@ -112,7 +115,8 @@ class Worker:
     # ----------------------------------------------------------------- state
     def heartbeat(self, state, job_id=None, **extra):
         payload = {"pid": os.getpid(), "state": state, "job_id": job_id, "updated_at": self.clock(),
-                   "num_envs": self.active_envs, "leg_root": str(self.leg_root), "gpu_lock": str(self.lock_path), **extra}
+                   "num_envs": self.active_envs, "leg_root": str(self.leg_root), "gpu_lock": str(self.lock_path),
+                   "host": self.host, **extra}
         tmp = self.heartbeat_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False))
         os.replace(tmp, self.heartbeat_path)
@@ -130,8 +134,8 @@ class Worker:
         job.update(fields)
         if "state" in fields:
             job["stage_label"] = STAGE_LABELS.get(fields["state"], fields["state"])
-            job["label"] = {"complete": "Spark Isaac Lab PPO 新訓練結果", "failed": "Spark 訓練失敗", "cancelled": "已取消"}.get(
-                fields["state"], "Spark GPU worker 執行中")
+            job["label"] = {"complete": "Isaac Lab PPO 新訓練結果", "failed": "訓練失敗", "cancelled": "已取消"}.get(
+                fields["state"], "GPU worker 執行中")
         job["worker_updated_at"] = self.clock()
         self.store.put("jobs", job)
         return job
@@ -153,7 +157,12 @@ class Worker:
         fixed = self.num_envs_override or os.environ.get("Q1_WORKER_NUM_ENVS")
         if fixed:
             print(f"Q1 Store worker: ignoring fixed num_envs={fixed}; envs follow each job's hours.", flush=True)
-        print(f"Q1 Store worker: leg_root={self.leg_root} envs=1024 at 4h, +1024 per extra hour data={self.store.data_dir}", flush=True)
+        gpu = self.host.get("gpu") or "no nvidia-smi"
+        print(
+            f"Q1 Store worker: host={self.host.get('hostname')} ({self.host.get('machine')}) gpu={gpu} "
+            f"leg_root={self.leg_root} envs=1024 at 4h, +1024 per extra hour data={self.store.data_dir}",
+            flush=True,
+        )
         while True:
             try:
                 if not self.run_once():
@@ -265,6 +274,10 @@ class Worker:
         command = self.command(directory, phase, extra)
         env = {k: v for k, v in os.environ.items() if k != "Q1_LEG_CURRICULUM_CONFIG"}
         env.update(Q1_LEG_ROOT=str(self.leg_root), PYTHONUNBUFFERED="1")
+        # Binary Isaac Sim torch on x86 RTX needs nvidia-* / ml_archive libs on LD_LIBRARY_PATH
+        # (libcusparseLt / libcufile / libcupti). isaac_env.sh does the same; keep a store-side
+        # safety net when an older leg checkout is used.
+        env = with_isaac_ld_library_path(env, self.leg_root)
         log_path = directory / "native.log"
         with log_path.open("ab") as log:
             log.write(f"\n===== {phase} phase started {time.strftime('%Y-%m-%d %H:%M:%S %z')} =====\n".encode())
@@ -367,7 +380,8 @@ class Worker:
             "evaluation_url": media + "evaluation.json", "reference_url": media + "reference.json", "log_url": media + "native.log",
             "checkpoint_url": media + "latest.pt" if (directory / "latest.pt").exists() else None,
             "title": job.get("action_name", "Q1 Motion"),
-            "provenance": f"本次 Spark Isaac Sim / PhysX · RSL-RL PPO · {evaluation.get('num_envs')} envs × {evaluation.get('iterations')} updates",
+            "provenance": f"本次 Isaac Sim / PhysX · RSL-RL PPO · {evaluation.get('num_envs')} envs × {evaluation.get('iterations')} updates"
+                         + (f" · {self.host.get('gpu')}" if self.host.get("gpu") else ""),
             "label": "新訓練 PPO · 通過本站驗收" if passed else "新訓練 PPO · 未通過驗收（保留結果供檢視）",
             "evaluation": {key: evaluation.get(key) for key in ("survival_rate", "upright", "height_error", "pose_rmse", "velocity_error", "root_error",
                                                              "duration", "episodes", "iterations", "num_envs", "elapsed_s", "store_gate", "passed")},

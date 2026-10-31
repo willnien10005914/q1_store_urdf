@@ -90,13 +90,37 @@ MediaPipe Pose 是人體姿態模型；H2-X 實測曾偵測到背景人物，候
 ```bash
 git clone git@github.com:willnien10005914/q1_store_urdf.git
 cd q1_store_urdf
+
+# 建議：啟動前先跑 idempotent setup（Hermes + Isaac Lab 3；已安裝會跳過）
+bash scripts/setup_store.sh
+# 檢查狀態：bash scripts/setup_store.sh --check
+
 bash scripts/start_store.sh --port 8876
+# 預設一併啟動 Hermes（:8877）；只要網站：加 --no-hermes
+# 重啟：bash scripts/restart_store.sh --port 8876
 # 或：python3 server.py --port 8876
 ```
+
+`setup_store.sh` 會寫入 `.data/store.env`（含 `Q1_ISAACLAB3_ROOT`、`Q1_LLM_*`）；
+`start_store.sh` 啟動時自動 source，並預設拉起 Hermes。也可用 `bash scripts/start_store.sh --setup`。
 
 開啟 **http://127.0.0.1:8876/**；同網段也可開 `http://<這台 Spark 的區網 IP>:8876/`。
 服務預設綁 `0.0.0.0`（區網可連）；若只要本機可改 `--host 127.0.0.1`。
 啟動腳本只執行網站服務，不啟動 GPU 訓練。
+
+### Isaac Lab 3 Tutorial（`isaac_v3`）
+
+開啟 **http://127.0.0.1:8876/tutorial**（或首頁 nav「Isaac Lab 3」）。八堂課涵蓋 3.0
+最大變格（多後端物理、ProxyArray／XYZW、URDF importer、致動器、Manager-based PPO、
+visualizers、ONNX 部署），可改 `example.py`、調參數、考測驗，並用本機 Hermes／離線助教對話。
+
+- Isaac Lab 3 / Hermes：由 `scripts/setup_store.sh` 預備（clone `~/IsaacLab3` @ v3.0.0、`uv sync`、
+  CUDA llama-cpp + GGUF）。已存在的 venv／模型／checkout 不會重裝。
+- 未跑 setup 時，需 Lab 的課程會標 `blocked` 並提示跑 `setup_store.sh`；遷移掃描／ONNX／錄影 fallback 仍可跑。
+- 也可手動 `export Q1_ISAACLAB3_ROOT=~/IsaacLab3` 或設 `Q1_LLM_BASE_URL`。
+- Hermes 可搜尋進修素材 → 待審 md → 人工同意 → Cursor 依 prompt 建課。
+
+設計細節：[docs/ISAACLAB3_TUTORIAL.md](docs/ISAACLAB3_TUTORIAL.md)。
 
 區網以外要用暫時公開網址時（免費約 60 分鐘）：
 
@@ -127,11 +151,12 @@ Q1_YTDLP="$PWD/.venv/bin/yt-dlp" Q1_STORE_PYTHON=.venv/bin/python bash scripts/s
 下載限制、登入／地區與網站變更仍可能造成失敗，此時可上傳有權使用的影片。
 YouTube 嵌入播放器只能預覽；要執行 MediaPipe，必須取得可讀影格的實際影片檔。
 
-### 選裝 Spark GPU 訓練 worker
+### 選裝本機 GPU 訓練 worker
 
 ```bash
-# 另一個終端（或 tmux）；預設 Q1_LEG_ROOT=$HOME/will/q1_leg_urdf
-Q1_WORKER_NUM_ENVS=2048 bash scripts/worker.sh --data-dir .data
+# 另一個終端（或 tmux）；亦會由 start_store.sh 在偵測到 NVIDIA + q1_leg_urdf 時自動啟動
+# 自動尋找 ~/projects/q1_leg_urdf、~/will/q1_leg_urdf 或 Q1_LEG_ROOT
+bash scripts/worker.sh --data-dir .data
 ```
 
 worker 透過 `q1_leg_urdf/scripts/isaac_env.sh` 找到 Isaac Sim Python，依序處理

@@ -1,0 +1,336 @@
+{
+  "id": "l06-manager-based-ppo",
+  "order": 6,
+  "title": "Manager-based 環境與 RSL-RL PPO：Q1 站立／速度追蹤訓練",
+  "title_en": "Manager-based env + RSL-RL PPO: Q1 balance / velocity tracking training",
+  "category": "training",
+  "level": "advanced",
+  "minutes": 60,
+  "summary": "用 3.0 的 ManagerBasedRLEnvCfg 組裝 Q1 的 observation／action／reward／termination／event terms，接 RSL-RL PPO，分段訓練並寫 progress.json 與 latest.pt，支援從 checkpoint 續訓。這是本教學第一個會真的在 GPU 上訓練的範例。",
+  "summary_en": "Assemble Q1 observation/action/reward/termination/event terms with ManagerBasedRLEnvCfg, attach RSL-RL PPO, train in chunks that write progress.json and latest.pt, and resume from a checkpoint. First lesson that trains for real on the GPU.",
+  "robots": [
+    "leg",
+    "wheel"
+  ],
+  "apis": [
+    "ManagerBasedRLEnvCfg",
+    "ObservationGroupCfg / ObsTerm",
+    "RewardTermCfg",
+    "TerminationTermCfg",
+    "EventTermCfg",
+    "JointPositionActionCfg / JointVelocityActionCfg",
+    "RslRlVecEnvWrapper",
+    "OnPolicyRunner.learn",
+    "MJWarpSolverCfg(njmax=1000)",
+    "--checkpoint latest"
+  ],
+  "params": [
+    {
+      "key": "physics",
+      "label": "物理 preset",
+      "type": "select",
+      "default": "newton_mjwarp",
+      "options": [
+        "newton_mjwarp",
+        "isaacsim_physx"
+      ],
+      "label_en": "Physics preset",
+      "help_en": ""
+    },
+    {
+      "key": "njmax",
+      "label": "MJWarp njmax（每 env 約束上限）",
+      "type": "int",
+      "default": 1000,
+      "min": 300,
+      "max": 5000,
+      "help": "太小會 nefc overflow → observation NaN。Q1 建議 ≥1000（對齊 Lab locomotion preset）。",
+      "label_en": "MJWarp njmax (constraint cap per env)",
+      "help_en": "Too small causes nefc overflow → NaN observations. Q1 needs ≥1000 (Lab locomotion preset)."
+    },
+    {
+      "key": "nconmax",
+      "label": "MJWarp nconmax（每 env 接觸上限）",
+      "type": "int",
+      "default": 300,
+      "min": 50,
+      "max": 2000,
+      "label_en": "MJWarp nconmax (contact cap per env)",
+      "help_en": ""
+    },
+    {
+      "key": "solver_iterations",
+      "label": "MJWarp solver iterations",
+      "type": "int",
+      "default": 100,
+      "min": 20,
+      "max": 300,
+      "label_en": "MJWarp solver iterations",
+      "help_en": ""
+    },
+    {
+      "key": "num_envs",
+      "label": "平行環境數",
+      "type": "int",
+      "default": 1024,
+      "min": 16,
+      "max": 8192,
+      "label_en": "Parallel env count",
+      "help_en": ""
+    },
+    {
+      "key": "max_iterations",
+      "label": "PPO 迭代上限",
+      "type": "int",
+      "default": 300,
+      "min": 10,
+      "max": 20000,
+      "label_en": "PPO iteration cap",
+      "help_en": ""
+    },
+    {
+      "key": "budget_minutes",
+      "label": "訓練預算（分鐘）",
+      "type": "float",
+      "default": 10,
+      "min": 1,
+      "max": 1440,
+      "step": 1,
+      "help": "到時就存檔評估；可之後按「續訓」從 latest.pt 接下去。",
+      "label_en": "Training budget (minutes)",
+      "help_en": "Saves and evaluates when time is up; use Resume to continue from latest.pt."
+    },
+    {
+      "key": "command_vx",
+      "label": "目標前進速度（m/s）",
+      "type": "float",
+      "default": 0.0,
+      "min": -1.0,
+      "max": 1.5,
+      "step": 0.1,
+      "help": "0 = 純平衡站立；>0 變成速度追蹤任務。",
+      "label_en": "Target forward velocity (m/s)",
+      "help_en": "0 = balance only; >0 enables velocity tracking."
+    },
+    {
+      "key": "w_balance",
+      "label": "reward：直立／高度",
+      "type": "float",
+      "default": 2.0,
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "label_en": "Reward: upright / height",
+      "help_en": ""
+    },
+    {
+      "key": "w_track",
+      "label": "reward：速度追蹤",
+      "type": "float",
+      "default": 1.0,
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "label_en": "Reward: velocity tracking",
+      "help_en": ""
+    },
+    {
+      "key": "w_energy",
+      "label": "reward：力矩懲罰（×1e-4）",
+      "type": "float",
+      "default": 2.0,
+      "min": 0,
+      "max": 50,
+      "step": 0.5,
+      "label_en": "Reward: torque penalty (×1e-4)",
+      "help_en": ""
+    },
+    {
+      "key": "w_smooth",
+      "label": "reward：動作平滑",
+      "type": "float",
+      "default": 0.05,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "label_en": "Reward: action smoothness",
+      "help_en": ""
+    },
+    {
+      "key": "learning_rate",
+      "label": "PPO learning rate",
+      "type": "float",
+      "default": 0.001,
+      "min": 1e-05,
+      "max": 0.01,
+      "step": 0.0001,
+      "label_en": "PPO learning rate",
+      "help_en": ""
+    },
+    {
+      "key": "entropy_coef",
+      "label": "PPO entropy coef",
+      "type": "float",
+      "default": 0.005,
+      "min": 0,
+      "max": 0.05,
+      "step": 0.001,
+      "label_en": "PPO entropy coef",
+      "help_en": ""
+    },
+    {
+      "key": "push_interval_s",
+      "label": "event：隨機推力間隔（s）",
+      "type": "float",
+      "default": 5.0,
+      "min": 0,
+      "max": 30,
+      "step": 0.5,
+      "help": "0 關閉。",
+      "label_en": "Event: random push interval (s)",
+      "help_en": "0 disables pushes."
+    }
+  ],
+  "references": [
+    {
+      "type": "docs",
+      "title": "Isaac Lab — Manager-based RL environment",
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/tutorials/03_envs/create_manager_rl_env.html"
+    },
+    {
+      "type": "docs",
+      "title": "Migrating To 3.0 — Reinforcement Learning（統一 CLI 與 --checkpoint）",
+      "url": "https://isaac-sim.github.io/IsaacLab/main/source/isaaclab/migrating.html"
+    },
+    {
+      "type": "github",
+      "title": "leggedrobotics/rsl_rl",
+      "url": "https://github.com/leggedrobotics/rsl_rl"
+    },
+    {
+      "type": "arxiv",
+      "title": "Proximal Policy Optimization Algorithms",
+      "url": "https://arxiv.org/abs/1707.06347"
+    },
+    {
+      "type": "arxiv",
+      "title": "Learning to Walk in Minutes Using Massively Parallel Deep RL",
+      "url": "https://arxiv.org/abs/2109.11978"
+    },
+    {
+      "type": "youtube",
+      "title": "Isaac Lab Office Hours（NVIDIA）",
+      "url": "https://www.youtube.com/@NVIDIAOmniverse"
+    }
+  ],
+  "quiz": [
+    {
+      "id": "q1",
+      "question": "Manager-based 環境中，reward 的權重寫在哪裡？",
+      "choices": [
+        "env.step() 裡 hard-code",
+        "RewardTermCfg(func=..., weight=..., params=...)",
+        "PPO cfg",
+        "URDF"
+      ],
+      "answer": 1,
+      "explain": "每個 term 是 func + weight + params；調 reward 不用改 env 類別，改 cfg 即可，這正是本頁滑桿所做的事。",
+      "question_en": "In a manager-based env, where are reward weights configured?",
+      "choices_en": [
+        "Hard-coded in env.step()",
+        "RewardTermCfg(func=..., weight=..., params=...)",
+        "PPO cfg only",
+        "URDF"
+      ],
+      "explain_en": "Each term is func + weight + params; tune rewards without changing the env class—what the sliders on this page do."
+    },
+    {
+      "id": "q2",
+      "question": "3.0 續訓 RSL-RL 的統一參數是？",
+      "choices": [
+        "--resume --load_run RUN",
+        "--checkpoint <path|latest|best>",
+        "--continue",
+        "--init_from"
+      ],
+      "answer": 1,
+      "explain": "--resume/--load_run 與 --use_pretrained_checkpoint 都被 --checkpoint 取代；latest/best 從最新相容 run 挑選。",
+      "question_en": "What is the unified 3.0 flag to resume RSL-RL training?",
+      "choices_en": [
+        "--resume --load_run RUN",
+        "--checkpoint <path|latest|best>",
+        "--continue",
+        "--init_from"
+      ],
+      "explain_en": "--resume/--load_run and --use_pretrained_checkpoint were replaced by --checkpoint; latest/best pick from the newest compatible run."
+    },
+    {
+      "id": "q3",
+      "question": "把 num_envs 從 1024 加到 4096，PPO 每次迭代的 transitions 會？",
+      "choices": [
+        "不變",
+        "×4（num_steps_per_env × num_envs）",
+        "÷4",
+        "取決於 learning rate"
+      ],
+      "answer": 1,
+      "explain": "RSL-RL 每迭代收集 num_steps_per_env × num_envs 步；環境數是主要的吞吐旋鈕（本站 4 小時＝1024 envs，每多 1 小時加 1024）。",
+      "question_en": "If num_envs goes from 1024 to 4096, PPO transitions per iteration?",
+      "choices_en": [
+        "Unchanged",
+        "×4 (num_steps_per_env × num_envs)",
+        "÷4",
+        "Depends on learning rate only"
+      ],
+      "explain_en": "RSL-RL collects num_steps_per_env × num_envs steps per iteration; env count is the main throughput knob."
+    },
+    {
+      "id": "q4",
+      "question": "Q1 Wheel 的輪子在 action 設計上應該用？",
+      "choices": [
+        "JointPositionActionCfg",
+        "JointVelocityActionCfg（或 effort），因為 continuous joint 的位置沒有意義",
+        "不要放進 action",
+        "BinaryJointAction"
+      ],
+      "answer": 1,
+      "explain": "continuous 關節的角度無上下界、也不是穩定目標；用速度（或力矩）動作搭配 stiffness=0 的致動器。",
+      "question_en": "How should Q1 Wheel wheels appear in the action space?",
+      "choices_en": [
+        "JointPositionActionCfg",
+        "JointVelocityActionCfg (or effort)—continuous joint position is not meaningful",
+        "Omit from actions",
+        "BinaryJointAction"
+      ],
+      "explain_en": "Continuous joints have unbounded angle; use velocity (or torque) actions with stiffness=0 actuators."
+    },
+    {
+      "id": "q5",
+      "question": "EventTermCfg(mode='interval') 的 push_by_setting_velocity 用來做什麼？",
+      "choices": [
+        "重設關節",
+        "定期給 root 隨機速度擾動，提升 robustness",
+        "改 reward",
+        "錄影"
+      ],
+      "answer": 1,
+      "explain": "events 有 startup／reset／interval 三種模式；interval 的隨機推力是腿式機器人常用的 domain randomization。",
+      "question_en": "What does EventTermCfg(mode='interval') push_by_setting_velocity do?",
+      "choices_en": [
+        "Reset joints",
+        "Periodic random root velocity pushes for robustness",
+        "Change reward",
+        "Record video"
+      ],
+      "explain_en": "Events have startup/reset/interval modes; interval pushes are common domain randomization for legged robots."
+    }
+  ],
+  "run": {
+    "kind": "isaac_v3",
+    "trainable": true,
+    "estimated_minutes": 12,
+    "resumable": true,
+    "note": "會真的訓練。進度條讀 progress.json；latest.pt 每個 chunk 更新，可透過 Pinggy 離開後再回來續訓。完成後 record 階段產生 result.mp4 與 rollout.json。",
+    "note_en": "Trains for real. Progress bar reads progress.json; latest.pt updates each chunk; resume via Pinggy after disconnect. Record phase produces result.mp4 and rollout.json."
+  }
+}

@@ -19,7 +19,11 @@ from pathlib import Path
 
 STORE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(STORE_ROOT))
-LEG_ROOT = Path(os.environ.get("Q1_LEG_ROOT", Path.home() / "will/q1_leg_urdf")).resolve()
+try:
+    from q1store.paths import resolve_leg_root
+    LEG_ROOT = resolve_leg_root(STORE_ROOT)
+except Exception:
+    LEG_ROOT = Path(os.environ.get("Q1_LEG_ROOT", Path.home() / "projects/q1_leg_urdf")).resolve()
 sys.path.insert(0, str(LEG_ROOT / "scripts/reinforcement_learning/rsl_rl"))
 # Foot-target curricula belong to the repository sidestep reference, never to store clips.
 os.environ.pop("Q1_LEG_CURRICULUM_CONFIG", None)

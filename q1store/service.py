@@ -210,15 +210,19 @@ class Store:
             return [json.loads(row[0]) for row in db.execute(f"SELECT payload FROM {table} ORDER BY rowid DESC")]
 
     def worker_status(self):
-        """Liveness of the Spark GPU worker from its heartbeat file."""
+        """Liveness of the local GPU training worker from its heartbeat file."""
         try:
             beat = json.loads(self.heartbeat_path.read_text())
         except (OSError, json.JSONDecodeError):
-            return {"online": False, "state": "offline", "job_id": None, "updated_at": None, "num_envs": None}
+            return {"online": False, "state": "offline", "job_id": None, "updated_at": None, "num_envs": None,
+                    "host": None, "leg_root": None, "gpu": None}
         age = self.clock() - float(beat.get("updated_at") or 0)
         online = age < WORKER_HEARTBEAT_MAX_AGE and beat.get("state") != "stopped"
+        host = beat.get("host") if isinstance(beat.get("host"), dict) else None
         return {"online": online, "state": beat.get("state") if online else "offline", "job_id": beat.get("job_id") if online else None,
-                "updated_at": beat.get("updated_at"), "num_envs": beat.get("num_envs"), "age_s": round(age, 1)}
+                "updated_at": beat.get("updated_at"), "num_envs": beat.get("num_envs"), "age_s": round(age, 1),
+                "host": host if online else None, "leg_root": beat.get("leg_root") if online else None,
+                "gpu": (host or {}).get("gpu") if online else None}
 
     def catalog(self):
         worker = self.worker_status()
@@ -234,10 +238,10 @@ class Store:
                 "worker_robot_types": ["leg"], "worker_library": "rsl_rl", "worker_physics": "isaacsim_physx",
                 "youtube_ingest": bool(self.downloader and self.ffmpeg), "upload": True, "motion_storage": True,
                 "video_segments": True, "segment_min_s": .5, "segment_max_s": 60,
-                "payments": "demo_only", "training": "demo_or_spark_gpu_worker",
+                "payments": "demo_only", "training": "demo_or_local_gpu_worker",
                 "robot_registry": True, "deployment_download": True, "hardware_delivery": False,
                 "sales_email": os.environ.get("Q1_SALES_EMAIL", ""),
-                "physics_scope": "Spark worker 以 Isaac Sim PhysX + RSL-RL PPO 執行雙足工作；其他選項保留為規劃並記錄在工作 JSON。",
+                "physics_scope": "本機 GPU worker 以 Isaac Sim PhysX + RSL-RL PPO 執行雙足工作（Spark、x86 + NVIDIA 等）；其他選項保留為規劃並記錄在工作 JSON。",
                 "rewards_scope": "Q1 任務的 reward 設計預設，並非所有 Isaac Lab 任務的通用選項。",
             },
         }
@@ -722,14 +726,14 @@ class Store:
                "target_person": target, "config": config, "action_name": action_name, "created_at": now,
                "state": "queued_for_worker" if mode == "worker" else "retargeting", "progress": 0,
                "result": None, "is_demo": mode == "demo", "newly_trained": False,
-               "label": "概念流程示範；不執行 PPO" if mode == "demo" else "等待 Spark GPU worker",
+               "label": "概念流程示範；不執行 PPO" if mode == "demo" else "等待 GPU worker",
                "plan": self.worker_plan(robot, config, source, target)}
         job["plan"]["job_id"] = job["id"]
         job["plan"]["action_name"] = action_name
         job["plan"]["motion_extraction_ready"] = bool(motion and not motion.get("demo", False))
         if mode == "worker":
             trainable = robot == "leg" and bool(motion)
-            job["stage_label"] = "等待 Spark GPU worker"
+            job["stage_label"] = "等待 GPU worker"
             job["training"] = {"budget_s": hours * 3600., "num_envs": config["num_envs"], "trainable": trainable,
                                "blocker": None if trainable else ("雙輪 Isaac Lab 任務尚未接入" if robot != "leg" else "缺少 MediaPipe 關節參考")}
             job["plan"]["executor"] = "q1_store_worker" if trainable else None
@@ -796,7 +800,7 @@ class Store:
         directory = self.jobs_dir / job["id"]
         training = dict(job.get("training") or {})
         state = job.get("state")
-        job["stage_label"] = job.get("stage_label") or {"queued_for_worker": "等待 Spark GPU worker"}.get(state, state)
+        job["stage_label"] = job.get("stage_label") or {"queued_for_worker": "等待 GPU worker"}.get(state, state)
         job["worker"] = worker
         if state in WORKER_ACTIVE_STATES and state != "queued_for_worker" and not worker["online"]:
             job["stage_label"] = "worker 離線 · 重新啟動 worker 後會接續"

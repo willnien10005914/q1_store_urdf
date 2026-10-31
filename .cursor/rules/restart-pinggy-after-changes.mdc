@@ -1,0 +1,15 @@
+---
+description: After store/tutorial code changes, restart web + Pinggy and report the new URL
+alwaysApply: true
+---
+
+# Restart store + Pinggy after changes
+
+When you finish a batch of code changes that affect the running Q1 Store (Python server, `q1store/`, `public/`, `tutorials/`, `scripts/`):
+
+1. Commit and push as usual.
+2. Run `bash scripts/restart_store.sh --port 8878` (Pinggy is **on by default**).
+3. Tell the user the new Pinggy HTTPS URL from the script output / `.data/pinggy.log`.
+4. Only skip Pinggy with `--no-pinggy` if the user explicitly asks not to expose a public tunnel.
+
+Do not leave an old Pinggy URL in replies after a restart — free tunnels get a new hostname each time.

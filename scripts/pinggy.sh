@@ -46,7 +46,14 @@ echo "Use only the https://….free.pinggy.net link (HTTP redirects)."
 echo "Free tunnel ~60 min. Press Ctrl-C to stop."
 echo
 
-exec ssh -4 -t -p 443 \
+# -t only when we have a real TTY; background / nohup / restart_store must omit it
+# so the public URL still prints to the log.
+SSH_TTY_FLAG=()
+if [[ -t 0 ]]; then
+  SSH_TTY_FLAG=(-t)
+fi
+
+exec ssh -4 "${SSH_TTY_FLAG[@]+"${SSH_TTY_FLAG[@]}"}" -p 443 \
   -o StrictHostKeyChecking=accept-new \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \
