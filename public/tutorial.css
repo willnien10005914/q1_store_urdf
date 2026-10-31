@@ -50,14 +50,30 @@
 .tut-progress-bar{height:6px;background:#eeeef3;border-radius:999px;overflow:hidden;width:120px}
 .tut-progress-bar>i{display:block;height:100%;background:var(--blue);width:0;transition:width .4s}
 
-.tut-layout{display:grid;grid-template-columns:240px minmax(0,1fr) 340px;gap:16px;align-items:start;transition:grid-template-columns .25s ease,gap .25s ease}
-.tut-layout.is-code-editing{grid-template-columns:168px minmax(0,1fr) 260px}
+.tut-layout{
+  --tut-side-w:240px;
+  --tut-agent-w:340px;
+  display:grid;
+  grid-template-columns:var(--tut-side-w) minmax(0,1fr) var(--tut-agent-w);
+  gap:16px;
+  align-items:start;
+  transition:grid-template-columns .25s ease,gap .25s ease;
+}
+.tut-layout.is-code-editing{grid-template-columns:minmax(140px,var(--tut-side-w)) minmax(0,1fr) minmax(220px,var(--tut-agent-w))}
 .tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr);gap:0}
 .tut-layout.is-code-focus .tut-side,
 .tut-layout.is-code-focus .tut-agent{display:none}
+.tut-layout.is-pane-resizing{transition:none;user-select:none;cursor:col-resize}
 .tut-side,.tut-main,.tut-agent{background:#fff;border:1px solid var(--line);border-radius:16px;min-height:70vh;min-width:0}
 .tut-layout.is-code-focus .tut-main{min-height:calc(100vh - 120px);border-radius:12px}
 .tut-side{padding:14px;position:sticky;top:86px;max-height:calc(100vh - 100px);overflow:auto}
+.tut-pane-resize{position:absolute;top:10px;bottom:10px;width:14px;z-index:4;cursor:col-resize;touch-action:none}
+.tut-pane-resize-end{right:-9px}
+.tut-pane-resize-start{left:-9px}
+.tut-pane-resize::after{content:"";position:absolute;top:18%;bottom:18%;left:5px;width:3px;border-radius:3px;background:#e6e6eb;transition:background .15s}
+.tut-pane-resize:hover::after,.tut-layout.is-pane-resizing .tut-pane-resize:hover::after,
+.tut-layout.is-pane-resizing .tut-pane-resize.is-active::after{background:var(--blue)}
+.tut-layout.is-code-focus .tut-pane-resize{display:none}
 .tut-side h2{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#8a8a92;margin:12px 0 8px}
 .tut-side h2:first-child{margin-top:0}
 .tut-lesson-link{display:block;padding:9px 10px;border-radius:10px;font-size:12px;line-height:1.4;color:#333;border:1px solid transparent}
@@ -146,7 +162,7 @@
 .tut-quiz .explain{font-size:11px;color:#526988;background:#f7faff;border-radius:8px;padding:8px 10px;margin-top:8px}
 .tut-quiz .ok{border-color:#b7e4cf}.tut-quiz .bad{border-color:#f0b4b4}
 
-.tut-agent{display:flex;flex-direction:column;position:sticky;top:86px;max-height:calc(100vh - 100px)}
+.tut-agent{display:flex;flex-direction:column;position:sticky;top:86px;max-height:calc(100vh - 100px);overflow:hidden}
 .tut-agent-head{padding:14px 16px;border-bottom:1px solid #f0f0f3;display:flex;justify-content:space-between;align-items:center;gap:8px}
 .tut-agent-head strong{font-size:13px}
 .tut-agent-head .pill{font-size:9px;background:#eef0f4;border-radius:999px;padding:3px 8px;color:#555}
@@ -183,7 +199,7 @@
   .tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr)}
   .tut-side,.tut-agent{position:static;max-height:none}
   .tut-lab,.tut-lab.is-editing,.tut-lab.is-wide{grid-template-columns:1fr}
-  .tut-code-resize{display:none}
+  .tut-code-resize,.tut-pane-resize{display:none}
   .tut-restore-dock{left:12px;right:12px;transform:none;justify-content:space-between}
   .nav-mega-grid{grid-template-columns:repeat(2,1fr)}
   .nav-mega-panel{left:0;transform:none}

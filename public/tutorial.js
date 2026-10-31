@@ -3,7 +3,26 @@ import {renderMarkdown} from './markdown.js';
 
 const USER_KEY = 'q1-tutorial-user';
 const ROBOT_KEY = 'q1-tutorial-robot';
+const LAYOUT_KEY = 'q1-tutorial-layout';
+const SIDE_MIN = 160;
+const SIDE_MAX = 480;
+const AGENT_MIN = 240;
+const AGENT_MAX = 560;
 const $ = (id) => document.getElementById(id);
+
+function loadLayoutPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+function saveLayoutPrefs() {
+  localStorage.setItem(LAYOUT_KEY, JSON.stringify({
+    sideWidth: state.sideWidth,
+    agentWidth: state.agentWidth,
+  }));
+}
 let toastTimer;
 function toast(msg) {
   const el = $('toast');
@@ -37,6 +56,8 @@ const state = {
   codeEditTimer: null,
   codeWide: false,   // widen code vs params inside .tut-lab
   codeFocus: false,  // hide left lesson nav + right Hermes (full-bleed code)
+  sideWidth: Number(loadLayoutPrefs().sideWidth) || 240,
+  agentWidth: Number(loadLayoutPrefs().agentWidth) || 340,
   runBusy: false,
   runId: null,
   lastRun: null,
@@ -60,6 +81,26 @@ function layoutEl() {
   return document.querySelector('.tut-layout');
 }
 
+function clamp(n, lo, hi) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function applyPaneWidths() {
+  const layout = layoutEl();
+  if (!layout) return;
+  const side = clamp(Math.round(state.sideWidth || 240), SIDE_MIN, SIDE_MAX);
+  const agent = clamp(Math.round(state.agentWidth || 340), AGENT_MIN, AGENT_MAX);
+  state.sideWidth = side;
+  state.agentWidth = agent;
+  layout.style.setProperty('--tut-side-w', `${side}px`);
+  layout.style.setProperty('--tut-agent-w', `${agent}px`);
+  if (state.codeFocus) {
+    layout.style.removeProperty('grid-template-columns');
+  } else {
+    layout.style.gridTemplateColumns = `${side}px minmax(0,1fr) ${agent}px`;
+  }
+}
+
 function syncLayoutChrome() {
   const editing = state.codeWide || state.codeFocus || document.activeElement === $('code');
   const lab = labEl();
@@ -74,6 +115,7 @@ function syncLayoutChrome() {
   layout?.classList.toggle('is-code-focus', state.codeFocus);
   document.body.classList.toggle('tut-code-focus', state.codeFocus);
   if (!state.codeWide && !state.codeFocus && lab) lab.style.removeProperty('grid-template-columns');
+  applyPaneWidths();
 
   const widenBtn = $('code-widen');
   if (widenBtn) {
@@ -98,6 +140,51 @@ function syncLayoutChrome() {
   const dock = $('layout-restore-dock');
   if (dock) dock.hidden = !state.codeFocus;
   requestAnimationFrame(() => syncCodeChrome());
+}
+
+function wirePaneResize() {
+  const layout = layoutEl();
+  if (!layout) return;
+
+  const bind = (handleId, which) => {
+    const handle = $(handleId);
+    if (!handle) return;
+    let dragging = false;
+    handle.addEventListener('pointerdown', (e) => {
+      if (state.codeFocus || window.matchMedia('(max-width: 1100px)').matches) return;
+      dragging = true;
+      handle.classList.add('is-active');
+      layout.classList.add('is-pane-resizing');
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const rect = layout.getBoundingClientRect();
+      const gap = 16;
+      if (which === 'side') {
+        const maxSide = Math.min(SIDE_MAX, rect.width - state.agentWidth - gap * 2 - 320);
+        state.sideWidth = clamp(e.clientX - rect.left, SIDE_MIN, Math.max(SIDE_MIN, maxSide));
+      } else {
+        const maxAgent = Math.min(AGENT_MAX, rect.width - state.sideWidth - gap * 2 - 320);
+        state.agentWidth = clamp(rect.right - e.clientX, AGENT_MIN, Math.max(AGENT_MIN, maxAgent));
+      }
+      applyPaneWidths();
+    });
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove('is-active');
+      layout.classList.remove('is-pane-resizing');
+      saveLayoutPrefs();
+    };
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+  };
+
+  bind('resize-side', 'side');
+  bind('resize-agent', 'agent');
+  applyPaneWidths();
 }
 
 function setCodeExpanded(on) {
