@@ -95,13 +95,13 @@ function renderMega(catalog, robot) {
   if (badge) { badge.hidden = !n; badge.textContent = String(n); }
 }
 
-/** Pace marquee by content width so short lines don't flash and long ones stay readable. */
+/** Slow marquee: ~12 px/s so ticker text stays readable instead of flashing past. */
 function syncTickerSpeed(scrollEl) {
   if (!scrollEl) return;
   requestAnimationFrame(() => {
     const track = scrollEl.parentElement;
     const half = Math.max(scrollEl.scrollWidth / 2, track?.clientWidth || 320, 240);
-    const seconds = Math.min(140, Math.max(28, half / 38));
+    const seconds = Math.min(360, Math.max(90, half / 12));
     scrollEl.style.setProperty('--tut-marquee-duration', `${seconds.toFixed(1)}s`);
     scrollEl.style.animation = 'none';
     void scrollEl.offsetWidth;

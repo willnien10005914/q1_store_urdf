@@ -2,7 +2,7 @@
 .tut-ticker{display:flex;align-items:center;gap:12px;background:#101216;color:#d7dbe3;font-size:11px;padding:0 16px;height:34px;overflow:hidden;position:relative;z-index:25}
 .tut-ticker .label{flex-shrink:0;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:#8ab7e5;font-size:9px}
 .tut-ticker .track{flex:1;overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
-.tut-ticker .scroll{display:inline-flex;gap:36px;white-space:nowrap;animation:tut-marquee var(--tut-marquee-duration,48s) linear infinite;will-change:transform}
+.tut-ticker .scroll{display:inline-flex;gap:36px;white-space:nowrap;animation:tut-marquee var(--tut-marquee-duration,120s) linear infinite;will-change:transform}
 .tut-ticker .scroll:hover{animation-play-state:paused}
 .tut-ticker a{color:#fff;text-decoration:none}
 .tut-ticker a:hover{color:#8ab7e5}
