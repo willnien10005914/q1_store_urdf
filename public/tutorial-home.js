@@ -53,18 +53,43 @@ function injectTicker() {
   else document.querySelector('header.nav')?.insertAdjacentElement('afterend', bar);
 }
 
+function bindMegaHover(mega) {
+  if (!mega || mega.dataset.boundHover) return;
+  mega.dataset.boundHover = '1';
+  let closeTimer = 0;
+  const open = () => { clearTimeout(closeTimer); mega.classList.add('is-open'); };
+  const scheduleClose = () => {
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => mega.classList.remove('is-open'), 280);
+  };
+  mega.addEventListener('pointerenter', open);
+  mega.addEventListener('pointerleave', scheduleClose);
+  mega.addEventListener('focusin', open);
+  mega.addEventListener('focusout', (e) => { if (!mega.contains(e.relatedTarget)) scheduleClose(); });
+  const trigger = mega.querySelector(':scope > a');
+  trigger?.addEventListener('click', (e) => {
+    if (!mega.classList.contains('is-open')) {
+      e.preventDefault();
+      open();
+    }
+  });
+}
+
 function renderMega(catalog, robot) {
   const panel = document.getElementById('mega-panel');
   if (!panel || !catalog) return;
   panel.hidden = false;
-  panel.innerHTML = `<div class="nav-mega-head"><strong>Isaac Lab 3 Tutorial</strong>
+  panel.innerHTML = `<div class="nav-mega-inner">
+    <div class="nav-mega-head"><strong>Isaac Lab 3 Tutorial</strong>
     <div class="robot-toggle">${['leg','wheel'].map((r) =>
       `<a class="button secondary" style="font-size:11px;min-height:28px;padding:4px 10px${robot===r?';background:#fff;box-shadow:0 1px 3px #0001':''}" href="/tutorial?robot=${r}">${r==='leg'?'雙足':'雙輪'}</a>`).join('')}</div></div>
     <div class="nav-mega-grid">${(catalog.categories||[]).map((cat) => `<div>
       <p class="nav-mega-cat">${escapeHtml(localeLabel(cat))}</p>
       ${(cat.lessons||[]).map((les) => `<a class="nav-mega-card" href="/tutorial#${les.id}"><strong>${escapeHtml(localeTitle(les))}</strong><small>${escapeHtml((getLocale()==='en'?les.summary_en:les.summary)||'').slice(0,90)}</small></a>`).join('')||'<small>—</small>'}
     </div>`).join('')}</div>
-    <div class="nav-mega-foot"><span>${catalog.lesson_count||0} lessons</span><a class="text-link" href="/tutorial">開啟教學 ›</a></div>`;
+    <div class="nav-mega-foot"><span>${catalog.lesson_count||0} lessons</span><a class="text-link" href="/tutorial">開啟教學 ›</a></div>
+  </div>`;
+  bindMegaHover(document.getElementById('nav-tutorial-mega'));
   const badge = document.getElementById('nav-pending-badge');
   const n = catalog.proposals?.pending || 0;
   if (badge) { badge.hidden = !n; badge.textContent = String(n); }

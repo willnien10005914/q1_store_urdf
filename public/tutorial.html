@@ -62,8 +62,9 @@
       <h2>進修提案</h2>
       <div class="tut-proposals" id="proposals-box"></div>
       <div class="tut-llm" id="llm-box">
-        <h3>本機 LLM</h3>
+        <h3>本機 LLM（啟用 Hermes）</h3>
         <p id="llm-status" style="font-size:11px;color:#8a8a92;margin:0 0 8px">偵測中…</p>
+        <ol id="llm-howto" style="margin:0 0 10px;padding-left:18px;font-size:10.5px;line-height:1.55;color:#555"></ol>
         <div id="llm-models"></div>
         <div class="tut-actions" style="margin-top:8px">
           <button type="button" class="button secondary" id="llm-refresh" style="font-size:11px;min-height:32px;padding:6px 12px">重新偵測</button>
@@ -72,7 +73,7 @@
       </div>
       <div style="margin-top:12px;padding:12px;border:1px solid #eeeef3;border-radius:12px;font-size:11px">
         <label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="discovery-toggle"> Hermes 搜尋進修課程</label>
-        <p id="discovery-meta" style="color:#8a8a92;margin:8px 0 0;line-height:1.5">關閉時不會上網找新素材。</p>
+        <p id="discovery-meta" style="color:#8a8a92;margin:8px 0 0;line-height:1.55">勾選後會定期上網找 Isaac Lab 3 文件／arXiv／YouTube；新素材會進「待審提案」並出現在上排走馬燈。不必等 Hermes LLM 上線也能掃描。</p>
         <button type="button" class="text-link" id="discovery-now" style="margin-top:8px;font-size:11px">立刻掃描一次</button>
       </div>
     </aside>

@@ -113,19 +113,46 @@ function renderSidebar() {
   }));
 }
 
+function bindMegaHover(root) {
+  const mega = root || document.getElementById('nav-tutorial-mega');
+  if (!mega || mega.dataset.boundHover) return;
+  mega.dataset.boundHover = '1';
+  let closeTimer = 0;
+  const open = () => { clearTimeout(closeTimer); mega.classList.add('is-open'); };
+  const scheduleClose = () => {
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => mega.classList.remove('is-open'), 280);
+  };
+  mega.addEventListener('pointerenter', open);
+  mega.addEventListener('pointerleave', scheduleClose);
+  mega.addEventListener('focusin', open);
+  mega.addEventListener('focusout', (e) => { if (!mega.contains(e.relatedTarget)) scheduleClose(); });
+  const trigger = mega.querySelector(':scope > a');
+  trigger?.addEventListener('click', (e) => {
+    // First click opens the panel; second click (when already open) follows the link.
+    if (!mega.classList.contains('is-open')) {
+      e.preventDefault();
+      open();
+    }
+  });
+}
+
 function renderMega() {
   const panel = $('mega-panel');
   if (!panel || !state.catalog) return;
   panel.hidden = false;
-  panel.innerHTML = `<div class="nav-mega-head"><strong>Isaac Lab 3 Tutorial</strong>
+  panel.innerHTML = `<div class="nav-mega-inner">
+    <div class="nav-mega-head"><strong>Isaac Lab 3 Tutorial</strong>
     <div class="robot-toggle" role="group">${['leg','wheel'].map((r) =>
       `<button type="button" data-mega-robot="${r}" class="${state.robot===r?'active':''}" aria-pressed="${state.robot===r}">${r==='leg'?'雙足':'雙輪'}</button>`).join('')}</div></div>
     <div class="nav-mega-grid">${state.catalog.categories.map((cat) => `<div>
       <p class="nav-mega-cat">${localeLabel(cat)}</p>
       ${(cat.lessons||[]).map((les) => `<a class="nav-mega-card" href="/tutorial#${les.id}"><strong>${localeTitle(les)}</strong><small>${localeSummary(les).slice(0,90)}</small></a>`).join('') || '<small>—</small>'}
     </div>`).join('')}</div>
-    <div class="nav-mega-foot"><span>${state.catalog.lesson_count||0} lessons</span><a class="text-link" href="/tutorial">開啟教學 ›</a></div>`;
+    <div class="nav-mega-foot"><span>${state.catalog.lesson_count||0} lessons</span><a class="text-link" href="/tutorial">開啟教學 ›</a></div>
+  </div>`;
   panel.querySelectorAll('[data-mega-robot]').forEach((b) => b.addEventListener('click', () => setRobot(b.dataset.megaRobot)));
+  bindMegaHover();
   const badge = $('nav-pending-badge');
   const n = state.catalog.proposals?.pending || 0;
   if (badge) { badge.hidden = !n; badge.textContent = String(n); }
@@ -159,9 +186,16 @@ function updateDiscovery() {
   const d = state.catalog?.discovery;
   if (!d) return;
   $('discovery-toggle').checked = !!d.enabled;
+  const base = getLocale()==='en'
+    ? 'New hits become pending proposals + ticker items. No LLM required.'
+    : '新素材會進「待審提案」並出現在上排走馬燈；不需 LLM。';
   $('discovery-meta').textContent = d.enabled
-    ? (getLocale()==='en' ? `Every ${d.interval_minutes} min · last ${d.last_run || 'never'}` : `每 ${d.interval_minutes} 分鐘 · 上次 ${d.last_run || '尚未'}`)
-    : (getLocale()==='en' ? 'Disabled — Hermes will not search the web.' : '關閉時不會上網找新素材。');
+    ? (getLocale()==='en'
+      ? `On · every ${d.interval_minutes} min · last ${d.last_run || 'never'}. ${base}`
+      : `已開啟 · 每 ${d.interval_minutes} 分鐘 · 上次 ${d.last_run || '尚未'}。${base}`)
+    : (getLocale()==='en'
+      ? `Off — click Scan now once, or enable for periodic search. ${base}`
+      : `關閉中 — 可按「立刻掃描一次」，或勾選後定期搜尋。${base}`);
 }
 
 function escapeHtml(s) {
@@ -373,6 +407,43 @@ async function showProposal(id, showPrompt) {
   }
 }
 
+function llmHowto(status) {
+  const rt = status.runtimes || {};
+  const en = getLocale() === 'en';
+  const steps = [];
+  const hasRuntime = !!(rt.llama_cpp?.available || rt.vllm?.available || rt.transformers?.available || rt.external?.available);
+  const hasModel = (status.models || []).some((m) => m.local);
+  const ready = status.chat_ready;
+  if (ready) {
+    steps.push(en ? 'Hermes is online — chat in the right panel.' : 'Hermes 已上線，可在右側對話。');
+    return steps;
+  }
+  steps.push(en
+    ? 'Offline = no local LLM server is running yet (GPU is OK).'
+    : '離線＝尚未啟動本機 LLM 伺服器（GPU 已偵測到，但還不能推理）。');
+  if (!hasRuntime) {
+    steps.push(en
+      ? 'Install a runtime, e.g. pip install "llama-cpp-python[server]" (or put llama-server on PATH), then click Refresh.'
+      : '先裝推理 runtime：pip install "llama-cpp-python[server]"（或把 llama-server 加入 PATH），再按「重新偵測」。');
+  } else {
+    steps.push(en ? 'Runtime detected.' : '已偵測到 runtime。');
+  }
+  if (!hasModel) {
+    steps.push(en
+      ? 'Download Hermes 3 · 8B Q4_K_M below (~4.9 GB). Progress shows here.'
+      : '下方按「下載」取得 Hermes 3 · 8B Q4_K_M（約 4.9 GB），進度會顯示在此。');
+  } else {
+    steps.push(en ? 'Model is on disk — click Start.' : '模型已在本機 — 按「啟動」。');
+  }
+  steps.push(en
+    ? 'Optional: export Q1_LLM_BASE_URL=http://127.0.0.1:PORT/v1 to use an existing OpenWebUI / vLLM.'
+    : '也可設 Q1_LLM_BASE_URL=http://127.0.0.1:埠/v1 接既有 OpenWebUI／vLLM。');
+  steps.push(en
+    ? 'Course search does not need the LLM: enable “搜尋進修課程” or click Scan now.'
+    : '搜尋新課程不需 LLM：左側勾「搜尋進修課程」或按「立刻掃描一次」即可。');
+  return steps;
+}
+
 async function refreshLlm() {
   try {
     state.llm = await api('/api/llm/status');
@@ -382,30 +453,46 @@ async function refreshLlm() {
   }
   const gpu = state.llm.gpu;
   const ready = state.llm.chat_ready;
+  const rt = state.llm.runtimes || {};
   $('agent-mode').textContent = ready ? 'Hermes' : (getLocale()==='en'?'Offline':'離線');
   $('agent-mode').classList.toggle('on', !!ready);
-  $('llm-status').textContent = gpu.available
-    ? `${gpu.gpus?.[0]?.name || 'GPU'} · ${Math.round((gpu.gpus?.[0]?.memory_total_mb||0)/1024)} GB · server: ${state.llm.server?.state || 'stopped'}`
-    : (gpu.reason || 'No GPU');
+  const runtimeBits = [
+    rt.llama_cpp?.available ? 'llama.cpp' : null,
+    rt.vllm?.available ? 'vLLM' : null,
+    rt.transformers?.available ? 'transformers' : null,
+    rt.external?.available ? 'external' : null,
+    rt.huggingface_hub?.cli || rt.huggingface_hub?.available ? 'hf-cli' : null,
+  ].filter(Boolean);
+  $('llm-status').textContent = (gpu.available
+    ? `${gpu.gpus?.[0]?.name || 'GPU'} · ${Math.round((gpu.gpus?.[0]?.memory_total_mb||0)/1024)} GB`
+    : (gpu.reason || 'No GPU'))
+    + ` · runtime: ${runtimeBits.join('/') || 'none'}`
+    + ` · server: ${state.llm.server?.state || 'stopped'}`;
+  const howto = $('llm-howto');
+  if (howto) howto.innerHTML = llmHowto(state.llm).map((s) => `<li>${escapeHtml(s)}</li>`).join('');
   $('llm-stop').hidden = !(state.llm.server?.state === 'running' || state.llm.server?.state === 'starting');
   const box = $('llm-models');
+  const canStart = !!(rt.llama_cpp?.available || rt.vllm?.available || rt.transformers?.available);
   box.innerHTML = (state.llm.models || []).map((m) => {
     const dl = m.download;
     const pct = dl?.percent ?? (m.local ? 100 : 0);
+    const startDisabled = !(m.runnable_backends || []).length || !canStart;
     return `<div class="tut-model"><div class="row"><strong>${escapeHtml(m.label)}</strong>
       <span>${m.local ? (getLocale()==='en'?'local':'已有') : (dl?.state || '—')}</span></div>
       ${!m.local && dl ? `<progress max="100" value="${pct||0}"></progress>` : ''}
       <div class="row">
         ${m.local
-          ? `<button type="button" class="button secondary" style="font-size:10px;min-height:28px;padding:4px 10px" data-start="${m.id}" ${!(m.runnable_backends||[]).length?'disabled':''}>啟動</button>`
+          ? `<button type="button" class="button secondary" style="font-size:10px;min-height:28px;padding:4px 10px" data-start="${m.id}" ${startDisabled?'disabled':''} title="${startDisabled?(getLocale()==='en'?'Install llama-cpp-python or llama-server first':'請先安裝 llama-cpp-python 或 llama-server'):''}">啟動</button>`
           : `<button type="button" class="button secondary" style="font-size:10px;min-height:28px;padding:4px 10px" data-dl="${m.id}">下載</button>`}
         <small style="color:#8a8a92">${escapeHtml(m.note||'')}</small>
       </div></div>`;
   }).join('');
   box.querySelectorAll('[data-dl]').forEach((b) => b.addEventListener('click', async () => {
-    await api('/api/llm/download', {model_id: b.dataset.dl});
-    toast(getLocale()==='en'?'Download started':'開始下載');
-    pollDownloads();
+    try {
+      await api('/api/llm/download', {model_id: b.dataset.dl});
+      toast(getLocale()==='en'?'Download started':'開始下載');
+      pollDownloads();
+    } catch (e) { toast(e.message); }
   }));
   box.querySelectorAll('[data-start]').forEach((b) => b.addEventListener('click', async () => {
     try {

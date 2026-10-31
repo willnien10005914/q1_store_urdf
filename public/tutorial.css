@@ -10,10 +10,12 @@
 @keyframes tut-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
 .nav-mega{position:relative}
-.nav-mega>a{display:inline-flex;align-items:center;gap:6px}
+.nav-mega>a{display:inline-flex;align-items:center;gap:6px;padding:18px 0;/* stretch hit area through the sticky nav row */}
 .nav-mega>a .badge{background:#ff3b30;color:#fff;border-radius:999px;font-size:9px;padding:1px 6px;min-width:16px;text-align:center;line-height:1.4}
-.nav-mega-panel{display:none;position:absolute;top:calc(100% + 14px);left:50%;transform:translateX(-40%);width:min(920px,92vw);background:#fff;border:1px solid #e6e6eb;border-radius:18px;box-shadow:0 30px 70px -40px #1d1d2f88;padding:18px;z-index:40}
-.nav-mega:hover .nav-mega-panel,.nav-mega:focus-within .nav-mega-panel{display:block}
+/* Panel hangs from the trigger with a continuous hover bridge (no dead 14px gap). */
+.nav-mega-panel{display:none;position:absolute;top:100%;left:50%;transform:translateX(-40%);width:min(920px,92vw);padding:14px 0 0;z-index:40;background:transparent;border:0;box-shadow:none}
+.nav-mega-panel>.nav-mega-inner{background:#fff;border:1px solid #e6e6eb;border-radius:18px;box-shadow:0 30px 70px -40px #1d1d2f88;padding:18px}
+.nav-mega:hover .nav-mega-panel,.nav-mega:focus-within .nav-mega-panel,.nav-mega.is-open .nav-mega-panel{display:block}
 .nav-mega-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
 .nav-mega-head strong{font-size:13px}
 .nav-mega-head .robot-toggle{padding:3px}
