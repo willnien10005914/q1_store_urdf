@@ -95,6 +95,20 @@ function renderMega(catalog, robot) {
   if (badge) { badge.hidden = !n; badge.textContent = String(n); }
 }
 
+/** Pace marquee by content width so short lines don't flash and long ones stay readable. */
+function syncTickerSpeed(scrollEl) {
+  if (!scrollEl) return;
+  requestAnimationFrame(() => {
+    const track = scrollEl.parentElement;
+    const half = Math.max(scrollEl.scrollWidth / 2, track?.clientWidth || 320, 240);
+    const seconds = Math.min(140, Math.max(28, half / 38));
+    scrollEl.style.setProperty('--tut-marquee-duration', `${seconds.toFixed(1)}s`);
+    scrollEl.style.animation = 'none';
+    void scrollEl.offsetWidth;
+    scrollEl.style.animation = '';
+  });
+}
+
 async function renderTicker() {
   try {
     const data = await get('/api/tutorial/ticker');
@@ -107,6 +121,7 @@ async function renderTicker() {
       return `<span>${escapeHtml(it.text)}</span>`;
     }).join('');
     scroll.innerHTML = html + html;
+    syncTickerSpeed(scroll);
     const count = document.getElementById('home-ticker-count');
     const n = data.counts?.pending || 0;
     if (count) { count.hidden = !n; count.textContent = n + (getLocale()==='en'?' pending':' 待審'); }

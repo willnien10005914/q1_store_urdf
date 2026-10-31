@@ -208,18 +208,27 @@ with launch_simulation(sim_cfg):
     @configclass
     class HardwareSceneCfg(InteractiveSceneCfg):
         ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
+        light = AssetBaseCfg(prim_path="/World/light", spawn=sim_utils.DomeLightCfg(intensity=2500.0))
         robot = ArticulationCfg(
             prim_path="{ENV_REGEX_NS}/Robot",
             spawn=sim_utils.UrdfFileCfg(
-                asset_path=P["urdf"], fix_base=False, merge_fixed_joints=False,
-                joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)),
+                asset_path=P["urdf"], fix_base=False, merge_fixed_joints=True,
+                joint_drive=sim_utils.UrdfFileCfg.JointDriveCfg(
+                    gains=sim_utils.UrdfFileCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0),
+                ),
             ),
-            init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 0.85)),
+            init_state=ArticulationCfg.InitialStateCfg(
+                pos=(0.0, 0.0, float(P.get("spawn_height", 0.95))),
+                rot=(0.0, 0.0, 0.0, 1.0),
+                joint_pos=P.get("default_joint_positions", {}),
+            ),
             actuators=actuators,
         )
 
-    # Isaac Lab 3 InteractiveSceneCfg uses replicate_physics (default True); duplicate_physics was removed.
+    # Must create SimulationContext first so InteractiveScene has a USD stage (same as l01/l05).
+    sim = sim_utils.SimulationContext(sim_cfg)
     scene = InteractiveScene(HardwareSceneCfg(num_envs=int(P.get("num_envs", 16)), env_spacing=2.5))
+    sim.reset()
     robot: Articulation = scene["robot"]
     pd_ids = robot.actuators["pd"].joint_indices
     steps = int(float(P.get("sim_seconds", 3.0)) / DT)
@@ -231,18 +240,18 @@ with launch_simulation(sim_cfg):
         t = k * DT
         # Gentle squat so heavier accessories need higher PD (scaled above).
         amp = 0.18
-        q_des = torch.zeros(scene.num_envs, len(pd_ids), device=robot.device)
+        q_des = torch.zeros(scene.num_envs, len(pd_ids), device=sim.device)
         # Bias first few hip/waist-like channels if present.
         for j in range(min(3, len(pd_ids))):
             q_des[:, j] = amp * math.sin(2 * math.pi * 0.4 * t) * (1 if j % 2 == 0 else -1)
         robot.actuators.target_command.set_position_index(value=q_des, joint_ids=pd_ids)
         if wheel_expr:
             robot.actuators.target_command.set_velocity_index(
-                value=torch.zeros(scene.num_envs, len(robot.actuators["wheels"].joint_indices), device=robot.device),
+                value=torch.zeros(scene.num_envs, len(robot.actuators["wheels"].joint_indices), device=sim.device),
                 joint_ids=robot.actuators["wheels"].joint_indices,
             )
         scene.write_data_to_sim()
-        scene.sim.step()
+        sim.step()
         scene.update(DT)
         q = robot.data.joint_pos.torch[:, pd_ids]
         err_acc += float(torch.mean(torch.abs(q - q_des)).item())

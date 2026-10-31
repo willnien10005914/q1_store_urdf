@@ -725,6 +725,21 @@ function renderMega() {
   if (badge) { badge.hidden = !n; badge.textContent = String(n); }
 }
 
+/** Pace marquee by content width (~36–42 px/s) so short lines don't flash and long ones stay readable. */
+function syncTickerSpeed(scrollEl) {
+  if (!scrollEl) return;
+  requestAnimationFrame(() => {
+    const track = scrollEl.parentElement;
+    const half = Math.max(scrollEl.scrollWidth / 2, track?.clientWidth || 320, 240);
+    const seconds = Math.min(140, Math.max(28, half / 38));
+    scrollEl.style.setProperty('--tut-marquee-duration', `${seconds.toFixed(1)}s`);
+    // Restart animation cleanly after duration change.
+    scrollEl.style.animation = 'none';
+    void scrollEl.offsetWidth;
+    scrollEl.style.animation = '';
+  });
+}
+
 async function updateTicker() {
   try {
     const data = await api('/api/tutorial/ticker');
@@ -740,6 +755,7 @@ async function updateTicker() {
       e.preventDefault();
       showProposal(a.dataset.proposal);
     }));
+    syncTickerSpeed(scroll);
     const count = $('ticker-count');
     const n = data.counts?.pending || 0;
     count.hidden = !n;

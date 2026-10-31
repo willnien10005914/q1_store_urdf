@@ -2,8 +2,6 @@
 import {createRobotViewer} from './robot-viewer.js';
 import {getLocale} from './i18n.js';
 
-const VIDEO = '/assets/tutorial/l09-hardware-explode/hardware.webm';
-
 function $(sel, root = document) {
   return typeof sel === 'string' ? root.querySelector(sel) : sel;
 }
@@ -69,26 +67,15 @@ export function createHardwareStudio(host, {ensureRobotManifest, getRobotId, onS
         <strong>${en() ? 'Hardware / explode studio' : '硬體／爆炸圖工作室'}</strong>
         <span class="muted" id="hw-status">${en() ? 'Loading…' : '載入中…'}</span>
       </div>
-      <div class="hw-studio-grid">
-        <div class="hw-stage-wrap">
-          <div class="hw-stage" id="hw-stage"></div>
-          <div class="hw-actions">
-            <button type="button" class="button secondary" id="hw-regen">${en() ? 'Regenerate look' : '重新生成外形'}</button>
-            <button type="button" class="button primary" id="hw-explode">${en() ? 'Analyze / explode' : '分析／分解'}</button>
-            <button type="button" class="button secondary" id="hw-assemble">${en() ? 'Assemble' : '重組'}</button>
-          </div>
-        </div>
-        <div class="hw-side">
-          <video class="hw-ref" id="hw-ref" controls playsinline muted loop
-            src="${VIDEO}" poster=""></video>
-          <p class="hw-ref-cap">${en()
-            ? 'Reference: RoboParty RP1 hardware-wall explode'
-            : '參考：RoboParty RP1 硬體牆爆炸動畫'}</p>
-          <p class="hw-hint muted">${en()
-            ? 'Tweaks sync with the lesson sliders. Run sends the same ToF/audio mass into ImplicitActuatorCfg.'
-            : '此處調整會同步左側參數滑桿；按「執行」會把 ToF／音訊質量送進 ImplicitActuatorCfg。'}</p>
-        </div>
+      <div class="hw-stage" id="hw-stage"></div>
+      <div class="hw-actions">
+        <button type="button" class="button secondary" id="hw-regen">${en() ? 'Regenerate look' : '重新生成外形'}</button>
+        <button type="button" class="button primary" id="hw-explode">${en() ? 'Analyze / explode' : '分析／分解'}</button>
+        <button type="button" class="button secondary" id="hw-assemble">${en() ? 'Assemble' : '重組'}</button>
       </div>
+      <p class="hw-hint muted">${en()
+        ? 'Tweaks sync with the lesson sliders. Run sends the same ToF/audio mass into ImplicitActuatorCfg.'
+        : '調整會同步參數滑桿；按「執行」會把 ToF／音訊質量送進 ImplicitActuatorCfg。'}</p>
     </div>`;
 
   const statusEl = $('#hw-status', host);
@@ -140,7 +127,6 @@ export function createHardwareStudio(host, {ensureRobotManifest, getRobotId, onS
     setStatus(en() ? 'Assembling…' : '重組中…');
   });
 
-  // Live-sync when lesson param sliders change.
   const paramsBox = document.getElementById('params');
   const onParamInput = (e) => {
     if (!ready || !viewer) return;
