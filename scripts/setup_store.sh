@@ -7,7 +7,7 @@
 #   bash scripts/setup_store.sh --isaaclab-only
 #   bash scripts/setup_store.sh --with-isaacsim   # also uv sync --extra isaacsim (large)
 #
-# Then:  bash scripts/start_store.sh --port 8878 --with-hermes
+# Then:  bash scripts/start_store.sh --port 8878   # Hermes starts by default
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -311,7 +311,8 @@ if [[ "$ISAAC_ONLY" -eq 0 ]]; then
   fi
 fi
 ok "env file: $ENV_FILE"
-ok "start web: bash scripts/start_store.sh --port 8878 --with-hermes"
+ok "start web (+ Hermes): bash scripts/start_store.sh --port 8878"
+ok "restart:              bash scripts/restart_store.sh --port 8878"
 
 if [[ "$MISSING" -ne 0 ]]; then
   echo

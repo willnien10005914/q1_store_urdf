@@ -285,7 +285,7 @@ class Tutorial:
             return {"mode": "isaaclab3", "label": f"Isaac Lab 3 @ {root}", "command": command + ["python"], "root": str(root)}
         reason = ("Q1_ISAACLAB3_ROOT 未設定或不是 Isaac Lab 3 checkout（需要 pyproject.toml 與 uv）。"
                   "請先跑 bash scripts/setup_store.sh（會檢查／安裝 Hermes 與 clone IsaacLab v3.0.0 + uv sync，"
-                  "已安裝的會跳過），再 bash scripts/start_store.sh --with-hermes。")
+                  "已安裝的會跳過），再 bash scripts/start_store.sh --port 8878（預設會帶起 Hermes）。")
         if (meta.get("run") or {}).get("fallback"):
             return {"mode": "python-fallback", "label": "無 Isaac Lab 3：執行範例的 fallback 分支", "command": [self.python], "reason": reason}
         return {"mode": "blocked", "label": "需要 Isaac Lab 3", "command": None, "reason": reason}

@@ -95,12 +95,14 @@ cd q1_store_urdf
 bash scripts/setup_store.sh
 # 檢查狀態：bash scripts/setup_store.sh --check
 
-bash scripts/start_store.sh --port 8876 --with-hermes
+bash scripts/start_store.sh --port 8876
+# 預設一併啟動 Hermes（:8877）；只要網站：加 --no-hermes
+# 重啟：bash scripts/restart_store.sh --port 8876
 # 或：python3 server.py --port 8876
 ```
 
 `setup_store.sh` 會寫入 `.data/store.env`（含 `Q1_ISAACLAB3_ROOT`、`Q1_LLM_*`）；
-`start_store.sh` 啟動時自動 source。也可用 `bash scripts/start_store.sh --setup --with-hermes`。
+`start_store.sh` 啟動時自動 source，並預設拉起 Hermes。也可用 `bash scripts/start_store.sh --setup`。
 
 開啟 **http://127.0.0.1:8876/**；同網段也可開 `http://<這台 Spark 的區網 IP>:8876/`。
 服務預設綁 `0.0.0.0`（區網可連）；若只要本機可改 `--host 127.0.0.1`。

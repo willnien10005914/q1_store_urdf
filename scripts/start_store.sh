@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Start the Q1 Store web server. Prefer running setup first:
+# Start the Q1 Store web server (Hermes on :8877 by default). Prefer setup first:
 #   bash scripts/setup_store.sh
-#   bash scripts/start_store.sh --port 8878 --with-hermes
+#   bash scripts/start_store.sh --port 8878
+#   bash scripts/start_store.sh --port 8878 --no-hermes   # web only
 set -euo pipefail
 
 Q1_STORE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${Q1_STORE_ENV_FILE:-$Q1_STORE_ROOT/.data/store.env}"
-WITH_HERMES=0
+# Hermes is the default companion service; opt out with --no-hermes.
+WITH_HERMES="${Q1_STORE_WITH_HERMES:-1}"
 PASS_ARGS=()
 
 for arg in "$@"; do
   case "$arg" in
     --with-hermes) WITH_HERMES=1 ;;
+    --no-hermes) WITH_HERMES=0 ;;
     --setup)
       bash "$Q1_STORE_ROOT/scripts/setup_store.sh"
       ;;
@@ -49,32 +52,47 @@ hermes_ready() {
   curl -sf --max-time 1 "http://127.0.0.1:${port}/v1/models" >/dev/null 2>&1
 }
 
-if [[ "$WITH_HERMES" -eq 1 ]]; then
+start_hermes() {
+  local port="${Q1_LLM_PORT:-8877}"
+  local script="$Q1_STORE_ROOT/scripts/hermes_server.sh"
+  local log="${Q1_STORE_DATA:-$Q1_STORE_ROOT/.data}/hermes.log"
+
   if hermes_ready; then
-    echo "Hermes already running on port ${Q1_LLM_PORT:-8877}"
+    echo "Hermes already running on port ${port}"
   else
-    if [[ ! -x "$Q1_STORE_ROOT/scripts/hermes_server.sh" ]]; then
-      echo "missing scripts/hermes_server.sh — run setup_store.sh first" >&2
-      exit 1
+    if [[ ! -x "$script" ]]; then
+      echo "Hermes script missing ($script) — run bash scripts/setup_store.sh --hermes-only; continuing without Hermes" >&2
+      return 0
     fi
-    echo "starting Hermes…"
-    nohup bash "$Q1_STORE_ROOT/scripts/hermes_server.sh" >"${Q1_STORE_DATA:-$Q1_STORE_ROOT/.data}/hermes.log" 2>&1 &
-    for _ in $(seq 1 60); do
+    mkdir -p "$(dirname "$log")"
+    echo "starting Hermes on :${port}…"
+    nohup bash "$script" >"$log" 2>&1 &
+    for _ in $(seq 1 90); do
       if hermes_ready; then
-        echo "Hermes ready: ${Q1_LLM_BASE_URL:-http://127.0.0.1:8877/v1}"
+        echo "Hermes ready: ${Q1_LLM_BASE_URL:-http://127.0.0.1:${port}/v1}"
         break
       fi
       sleep 1
     done
-    hermes_ready || { echo "Hermes failed to start — see ${Q1_STORE_DATA:-$Q1_STORE_ROOT/.data}/hermes.log" >&2; exit 1; }
+    if ! hermes_ready; then
+      echo "Hermes failed to start — see $log" >&2
+      return 1
+    fi
   fi
   # Ensure the web process sees the OpenAI-compatible endpoint even if store.env was old.
-  export Q1_LLM_BASE_URL="${Q1_LLM_BASE_URL:-http://127.0.0.1:${Q1_LLM_PORT:-8877}/v1}"
+  export Q1_LLM_BASE_URL="${Q1_LLM_BASE_URL:-http://127.0.0.1:${port}/v1}"
   if [[ -z "${Q1_LLM_MODEL:-}" ]] && hermes_ready; then
-    Q1_LLM_MODEL="$(curl -sf "http://127.0.0.1:${Q1_LLM_PORT:-8877}/v1/models" \
+    Q1_LLM_MODEL="$(curl -sf "http://127.0.0.1:${port}/v1/models" \
       | "$Q1_STORE_PYTHON" -c 'import sys,json; print(json.load(sys.stdin)["data"][0]["id"])')"
     export Q1_LLM_MODEL
   fi
+  return 0
+}
+
+if [[ "$WITH_HERMES" -eq 1 ]]; then
+  start_hermes || exit 1
+else
+  echo "skipping Hermes (--no-hermes)"
 fi
 
 exec "$Q1_STORE_PYTHON" "$Q1_STORE_ROOT/server.py" "${PASS_ARGS[@]}"
