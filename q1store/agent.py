@@ -110,6 +110,7 @@ EXAMPLE_API_HINT = re.compile(
     r"|too many values to unpack \(expected 2\)|"
     r"|File \"example\.py\"|"
     r"|unexpected keyword argument ['\"]duplicate_physics['\"]|"
+    r"|No current stage available|"
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
 )
@@ -1335,6 +1336,8 @@ def heal_stale_example_draft(
         synth.append("nefc overflow - please increase njmax to 1000\ncontains NaN values")
     if "duplicate_physics" in code and (lid.startswith("l09") or "HardwareSceneCfg" in code):
         synth.append("TypeError: HardwareSceneCfg.__init__() got an unexpected keyword argument 'duplicate_physics'")
+    if lid.startswith("l09") and "InteractiveScene(" in code and "SimulationContext" not in code:
+        synth.append("RuntimeError: No current stage available. Did you create a stage?")
     if "VisualizerCfg(kind=" in code or "sim_cfg.visualizers" in code:
         synth.append("TypeError: VisualizerCfg.__init__() got an unexpected keyword argument 'kind'")
     if "RslRlPpoActorCriticCfg" in code or (
@@ -1530,17 +1533,28 @@ def fix_known_example_api_errors(
             text = text2
             notes.append("移除 duplicate_physics=…（Isaac Lab 3 InteractiveSceneCfg 已無此參數；預設 replicate_physics=True）")
 
+    # InteractiveScene needs SimulationContext first (creates the USD stage).
+    if (
+        re.search(r"No current stage available", err, re.I)
+        and canon
+        and "SimulationContext" in canon
+        and canon_newer()
+    ):
+        notes.append("InteractiveScene 前先建 SimulationContext（建立 USD stage）")
+        return _ship_canonical(canon, lid, notes)
+
     # Generic: example.py TypeError/KeyError/AttributeError and the lesson file is newer — ship it.
     if (
         canon_newer()
         and re.search(r"File \"example\.py\"", err)
-        and re.search(r"TypeError:|KeyError:|AttributeError:|unexpected keyword", err, re.I)
+        and re.search(r"TypeError:|KeyError:|AttributeError:|unexpected keyword|No current stage", err, re.I)
         and (
             lid.startswith(("l02", "l04", "l06", "l07", "l08", "l09"))
             or "OnPolicyRunner" in text
             or "VisualizerCfg" in text
             or "NewtonCfg" in text
             or "duplicate_physics" in text
+            or "InteractiveScene" in text
         )
     ):
         notes.append("課程最新 example.py（對齊已安裝 Isaac Lab 3 API）")
