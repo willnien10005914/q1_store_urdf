@@ -41,28 +41,31 @@ if [[ "$has_port" -eq 0 ]]; then
 fi
 
 echo "stopping store on :${PORT} and Hermes on :${LLM_PORT}…"
-# Kill by cwd-relative or absolute argv (manual `python server.py --port N` has no full path).
-pkill -f "$Q1_STORE_ROOT/server.py" 2>/dev/null || true
-pkill -f "[/ ]server\\.py --port ${PORT}" 2>/dev/null || true
-pkill -f "$Q1_STORE_ROOT/scripts/hermes_server.sh" 2>/dev/null || true
-pkill -f "llama_cpp\\.server.*--port ${LLM_PORT}" 2>/dev/null || true
-pkill -f "R0:127\\.0\\.0\\.1:${PORT}.*a\\.pinggy\\.io" 2>/dev/null || true
-# Last resort: whoever still owns the listen ports.
-if command -v fuser >/dev/null 2>&1; then
-  fuser -k "${PORT}/tcp" 2>/dev/null || true
-  fuser -k "${LLM_PORT}/tcp" 2>/dev/null || true
-elif command -v lsof >/dev/null 2>&1; then
-  lsof -ti "tcp:${PORT}" -sTCP:LISTEN 2>/dev/null | xargs -r kill 2>/dev/null || true
-  lsof -ti "tcp:${LLM_PORT}" -sTCP:LISTEN 2>/dev/null | xargs -r kill 2>/dev/null || true
-fi
-sleep 1
-# Confirm ports free before relaunch.
-for _ in $(seq 1 10); do
-  if ! ss -ltn "( sport = :${PORT} or sport = :${LLM_PORT} )" 2>/dev/null | grep -q LISTEN; then
-    break
+kill_port() {
+  local port="$1"
+  local pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  elif command -v ss >/dev/null 2>&1; then
+    pids="$(ss -ltnp "sport = :${port}" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u)"
   fi
-  sleep 0.5
-done
+  if [[ -n "$pids" ]]; then
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    sleep 0.4
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+  fi
+}
+# Match absolute or cwd-relative argv forms.
+pkill -f "${Q1_STORE_ROOT}/server.py" >/dev/null 2>&1 || true
+pkill -f "server.py --port ${PORT}" >/dev/null 2>&1 || true
+pkill -f "${Q1_STORE_ROOT}/scripts/hermes_server.sh" >/dev/null 2>&1 || true
+pkill -f "llama_cpp.server .*--port ${LLM_PORT}" >/dev/null 2>&1 || true
+pkill -f "a.pinggy.io" >/dev/null 2>&1 || true
+kill_port "$PORT"
+kill_port "$LLM_PORT"
+sleep 1
 
 LOG_DIR="${Q1_STORE_DATA:-$Q1_STORE_ROOT/.data}"
 mkdir -p "$LOG_DIR"
