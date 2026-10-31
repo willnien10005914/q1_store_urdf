@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Isaac Lab 3 Tutorial — Q1 Store</title>
+<meta name="description" content="學習 Isaac Lab 3.0 API：多後端物理、URDF、致動器、RSL-RL PPO、錄影與部署。本機 Hermes 助教可對話與改 example.py。">
+<meta name="theme-color" content="#f5f5f7">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/tutorial.css">
+<script type="module" src="/tutorial.js"></script>
+</head>
+<body>
+<header class="nav">
+  <a href="/" class="brand" data-i18n-aria="nav_home" aria-label="Q1 Store 首頁">q<span>1</span><em>store</em></a>
+  <nav aria-label="Primary">
+    <a href="/">首頁</a>
+    <div class="nav-mega" id="nav-tutorial-mega">
+      <a href="/tutorial" class="nav-highlight" id="nav-tutorial-link">Isaac Lab 3 <span class="badge" id="nav-pending-badge" hidden>0</span></a>
+      <div class="nav-mega-panel" id="mega-panel" hidden></div>
+    </div>
+    <a href="/#studio" data-i18n="nav_studio">創作工作室</a>
+    <a href="/#robots" data-i18n="nav_robots">我的 Q1</a>
+  </nav>
+  <div class="nav-tools">
+    <div class="lang-switch" role="group" aria-label="語言">
+      <button type="button" data-lang="zh-Hant" class="active" aria-pressed="true">繁中</button>
+      <button type="button" data-lang="en" aria-pressed="false">EN</button>
+    </div>
+    <a class="nav-github" href="https://github.com/willnien10005914/q1_store_urdf/tree/isaac_v3" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</header>
+<div class="tut-ticker" id="ticker" aria-live="polite">
+  <span class="label">Hermes</span>
+  <div class="track"><div class="scroll" id="ticker-scroll"><span>啟用「搜尋進修課程」後，這裡會出現新的 Isaac Lab 3 素材建議。</span></div></div>
+  <span class="count" id="ticker-count" hidden>0 pending</span>
+</div>
+
+<div class="tut-page">
+  <div class="tut-top">
+    <div>
+      <p class="eyebrow">ISAAC LAB 3.0 · Q1 TUTORIAL</p>
+      <h1 id="page-title">學著改 API，不是只按按鈕。</h1>
+      <p id="page-lead">每個課程都有可改的 example.py、參數滑桿、測驗，以及本機 Hermes 助教。訓練寫入 progress.json／latest.pt，Pinggy 斷線後可續訓。</p>
+    </div>
+    <div class="tut-user" id="user-box">
+      <input id="user-name" maxlength="40" placeholder="你的名字" aria-label="註冊名字">
+      <button type="button" class="button primary" id="user-register">進入</button>
+      <span class="level" id="user-level" hidden></span>
+      <div class="tut-progress-bar" id="user-bar" hidden title="完成百分比"><i></i></div>
+    </div>
+  </div>
+
+  <div class="tut-layout">
+    <aside class="tut-side" id="sidebar">
+      <div class="robot-toggle" role="group" aria-label="機型">
+        <button type="button" data-robot="leg" class="active" aria-pressed="true">雙足</button>
+        <button type="button" data-robot="wheel" aria-pressed="false">雙輪</button>
+      </div>
+      <div id="lesson-nav"><p class="tut-empty">載入課程中…</p></div>
+      <h2>我的訓練</h2>
+      <div id="my-runs"><p class="tut-empty" style="padding:12px;font-size:11px">完成執行後會列在這裡。</p></div>
+      <h2>進修提案</h2>
+      <div class="tut-proposals" id="proposals-box"></div>
+      <div class="tut-llm" id="llm-box">
+        <h3>本機 LLM</h3>
+        <p id="llm-status" style="font-size:11px;color:#8a8a92;margin:0 0 8px">偵測中…</p>
+        <div id="llm-models"></div>
+        <div class="tut-actions" style="margin-top:8px">
+          <button type="button" class="button secondary" id="llm-refresh" style="font-size:11px;min-height:32px;padding:6px 12px">重新偵測</button>
+          <button type="button" class="button secondary" id="llm-stop" style="font-size:11px;min-height:32px;padding:6px 12px" hidden>停止伺服器</button>
+        </div>
+      </div>
+      <div style="margin-top:12px;padding:12px;border:1px solid #eeeef3;border-radius:12px;font-size:11px">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="discovery-toggle"> Hermes 搜尋進修課程</label>
+        <p id="discovery-meta" style="color:#8a8a92;margin:8px 0 0;line-height:1.5">關閉時不會上網找新素材。</p>
+        <button type="button" class="text-link" id="discovery-now" style="margin-top:8px;font-size:11px">立刻掃描一次</button>
+      </div>
+    </aside>
+
+    <section class="tut-main" id="main">
+      <div class="tut-empty" id="welcome">選左側課程開始。第一次請先註冊名字，進度會綁在這個名字上。</div>
+      <div id="lesson-view" hidden>
+        <div class="tut-main-head">
+          <div>
+            <p class="eyebrow" id="lesson-cat"></p>
+            <h2 id="lesson-title"></h2>
+            <p id="lesson-summary"></p>
+          </div>
+          <div class="tut-actions">
+            <span class="subtle-pill" id="lesson-runtime"></span>
+            <span class="subtle-pill" id="lesson-minutes"></span>
+          </div>
+        </div>
+        <div class="tut-tabs" role="tablist">
+          <button type="button" data-tab="read" class="active">課文</button>
+          <button type="button" data-tab="lab">練習與執行</button>
+          <button type="button" data-tab="quiz">測驗</button>
+          <button type="button" data-tab="refs">參考</button>
+        </div>
+        <div class="tut-pane active" data-pane="read"><div class="tut-md" id="lesson-md"></div></div>
+        <div class="tut-pane" data-pane="lab">
+          <div class="tut-lab">
+            <div class="tut-code-wrap">
+              <div class="tut-actions">
+                <strong style="font-size:12px">example.py</strong>
+                <button type="button" class="text-link" id="code-reset">還原原文</button>
+                <button type="button" class="text-link" id="code-save">存草稿</button>
+              </div>
+              <textarea id="code" spellcheck="false" aria-label="example.py"></textarea>
+            </div>
+            <div>
+              <div class="tut-params" id="params"></div>
+              <div class="tut-actions">
+                <button type="button" class="button primary" id="run-btn">執行</button>
+                <button type="button" class="button secondary" id="cancel-btn" hidden>取消</button>
+                <button type="button" class="button secondary" id="resume-btn" hidden>續訓</button>
+              </div>
+              <div class="tut-run-status" id="run-status" hidden></div>
+              <div class="tut-media" id="run-media"></div>
+            </div>
+          </div>
+        </div>
+        <div class="tut-pane" data-pane="quiz">
+          <div class="tut-quiz" id="quiz"></div>
+          <div class="tut-actions"><button type="button" class="button primary" id="quiz-submit">送出測驗</button></div>
+          <div id="quiz-result" style="margin-top:12px;font-size:12px"></div>
+        </div>
+        <div class="tut-pane" data-pane="refs"><ul class="tut-refs" id="refs"></ul></div>
+      </div>
+    </section>
+
+    <aside class="tut-agent" id="agent">
+      <div class="tut-agent-head">
+        <strong>Hermes 助教</strong>
+        <span class="pill" id="agent-mode">離線</span>
+      </div>
+      <div class="tut-chat" id="chat"></div>
+      <div class="tut-compose">
+        <textarea id="chat-input" placeholder="問這堂課的 API、請 Hermes 改參數或執行 /help" rows="3"></textarea>
+        <div class="row">
+          <button type="button" class="button primary" id="chat-send" style="min-height:36px;padding:8px 16px">送出</button>
+          <button type="button" class="text-link" id="chat-clear">清除對話</button>
+        </div>
+        <p class="hint">指令：/search /arxiv /youtube /fetch /params /run /code /propose /remember /help。有本機 LLM 時會自動走 Hermes 推理視窗。</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<dialog id="proposal-dialog">
+  <button type="button" class="dialog-close" id="proposal-close" aria-label="關閉">×</button>
+  <p class="eyebrow">COURSE PROPOSAL</p>
+  <h2 id="proposal-title"></h2>
+  <div class="tut-md" id="proposal-body" style="max-height:50vh;overflow:auto"></div>
+  <div class="tut-actions" style="margin-top:16px">
+    <button type="button" class="button primary" id="proposal-approve">同意（待 Cursor 建立）</button>
+    <button type="button" class="button secondary" id="proposal-reject">拒絕</button>
+    <button type="button" class="button secondary" id="proposal-prompt">複製 Cursor prompt</button>
+  </div>
+  <pre id="proposal-cursor" class="diff-box" hidden style="margin-top:12px"></pre>
+</dialog>
+
+<dialog id="diff-dialog">
+  <button type="button" class="dialog-close" id="diff-close" aria-label="關閉">×</button>
+  <p class="eyebrow">CODE PROPOSAL</p>
+  <h2>Hermes 建議的 example.py</h2>
+  <p id="diff-explain" style="font-size:12px;color:#666;line-height:1.6"></p>
+  <pre class="diff-box" id="diff-body"></pre>
+  <div class="tut-actions" style="margin-top:16px">
+    <button type="button" class="button primary" id="diff-accept">採用</button>
+    <button type="button" class="button secondary" id="diff-dismiss">略過</button>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

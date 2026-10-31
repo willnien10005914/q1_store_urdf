@@ -98,6 +98,19 @@ bash scripts/start_store.sh --port 8876
 服務預設綁 `0.0.0.0`（區網可連）；若只要本機可改 `--host 127.0.0.1`。
 啟動腳本只執行網站服務，不啟動 GPU 訓練。
 
+### Isaac Lab 3 Tutorial（`isaac_v3`）
+
+開啟 **http://127.0.0.1:8876/tutorial**（或首頁 nav「Isaac Lab 3」）。八堂課涵蓋 3.0
+最大變格（多後端物理、ProxyArray／XYZW、URDF importer、致動器、Manager-based PPO、
+visualizers、ONNX 部署），可改 `example.py`、調參數、考測驗，並用本機 Hermes／離線助教對話。
+
+- 需要真實 Isaac Lab 3 執行時：`export Q1_ISAACLAB3_ROOT=~/IsaacLab3`（v3.0.0 checkout + `uv sync`）。
+  未設定時，需 Lab 的課程會標 `blocked` 並寫明原因；遷移掃描／ONNX 匯出／錄影 fallback 仍可跑。
+- 本機 LLM：在 Tutorial 頁下載 Hermes GGUF 後啟動；或設 `Q1_LLM_BASE_URL`。
+- Hermes 可搜尋進修素材 → 待審 md → 人工同意 → Cursor 依 prompt 建課。
+
+設計細節：[docs/ISAACLAB3_TUTORIAL.md](docs/ISAACLAB3_TUTORIAL.md)。
+
 區網以外要用暫時公開網址時（免費約 60 分鐘）：
 
 ```bash
