@@ -71,7 +71,7 @@ with launch_simulation(sim_cfg):
     from isaaclab.scene import InteractiveSceneCfg
     from isaaclab.utils import configclass
     from isaaclab.utils.noise import UniformNoiseCfg as Unoise
-    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg, RslRlVecEnvWrapper
+    from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg, RslRlVecEnvWrapper
     from rsl_rl.runners import OnPolicyRunner
 
     VX = float(P.get("command_vx", 0.0))
@@ -164,7 +164,13 @@ with launch_simulation(sim_cfg):
         max_iterations = int(P.get("max_iterations", 300))
         save_interval = 10 ** 9  # the lesson saves latest.pt itself after every chunk
         experiment_name = "q1_tutorial_balance"
-        policy = RslRlPpoActorCriticCfg(init_noise_std=1.0, actor_hidden_dims=[512, 256, 128], critic_hidden_dims=[512, 256, 128], activation="elu")
+        # rsl-rl >= 4/5: actor + critic MLPModel (class_name=MLPModel), not deprecated policy=ActorCritic.
+        obs_groups = {"actor": ["policy"], "critic": ["policy"]}
+        actor = RslRlMLPModelCfg(
+            hidden_dims=[512, 256, 128], activation="elu", obs_normalization=False,
+            distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+        )
+        critic = RslRlMLPModelCfg(hidden_dims=[512, 256, 128], activation="elu", obs_normalization=False)
         algorithm = RslRlPpoAlgorithmCfg(value_loss_coef=1.0, use_clipped_value_loss=True, clip_param=0.2, entropy_coef=float(P.get("entropy_coef", 0.005)),
                                          num_learning_epochs=5, num_mini_batches=4, learning_rate=float(P.get("learning_rate", 1e-3)), schedule="adaptive",
                                          gamma=0.99, lam=0.95, desired_kl=0.01, max_grad_norm=1.0)
