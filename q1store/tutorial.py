@@ -489,14 +489,20 @@ class Tutorial:
     def _launch(self, run, resume=False):
         directory = self.run_dir(run["id"])
         runtime = run["runtime"]
-        command = list(runtime["command"]) + ["example.py", "--job-dir", str(directory), "--params", str(directory / "params.json")]
+        # lab3_runner applies the kitless PhysxJointAPI patch before example.py, so old drafts still work.
+        runpath = Path(__file__).resolve().parent / "runpath"
+        runner = runpath / "lab3_runner.py"
+        script_args = ["example.py", "--job-dir", str(directory), "--params", str(directory / "params.json")]
         if resume and run["resumable"]:
-            command.append("--resume")
+            script_args.append("--resume")
+        if runtime.get("mode") == "isaaclab3" and runner.is_file():
+            command = list(runtime["command"]) + [str(runner), *script_args]
+        else:
+            command = list(runtime["command"]) + script_args
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"), "LANG": "C.UTF-8",
                "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1", "HEADLESS": "1", "Q1_TUTORIAL_RUN": run["id"]}
-        # Kitless URDF importer lacks PhysxSchema; sitecustomize patches add_joint_schemas.
-        compat = str((Path(__file__).resolve().parent / "runpath"))
-        env["PYTHONPATH"] = compat + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")
+        # sitecustomize + lab3_compat MetaPathFinder also patch when PYTHONPATH includes runpath.
+        env["PYTHONPATH"] = str(runpath) + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")
         for key in ("CUDA_VISIBLE_DEVICES", "HF_HOME", "XDG_CACHE_HOME", "DISPLAY", "LD_LIBRARY_PATH",
                     "ISAACSIM_PATH", "UV_CACHE_DIR", "Q1_ISAACLAB3_ROOT"):
             if key in os.environ:

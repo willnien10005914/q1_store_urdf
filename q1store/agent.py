@@ -36,6 +36,8 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {}}},
     {"name": "repair_isaaclab_importers", "description": "Install Isaac Lab 3 standalone URDF/MJCF importers (uv sync --extra importers / isaacsim-asset-isolated). Use when run.log shows ModuleNotFoundError: No module named 'isaacsim'.",
      "parameters": {"type": "object", "properties": {}}},
+    {"name": "repair_physx_joint", "description": "Patch kitless URDF importer so PhysxJointAPI ApplyAPI failures are skipped (newton_mjwarp without full Isaac Sim). Use when run.log shows ApplyAPI / PhysxJointAPI / PhysxSchema errors.",
+     "parameters": {"type": "object", "properties": {}}},
     {"name": "propose_code", "description": "Propose a full replacement example.py. The learner sees a diff and must accept it; explain why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "explanation": {"type": "string"}}, "required": ["code", "explanation"]}},
     {"name": "set_params", "description": "Set lesson parameters (sliders) for the learner, e.g. {\"num_envs\": 2048}.",
@@ -50,9 +52,11 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"facts": {"type": "array", "items": {"type": "string"}}}, "required": ["facts"]}},
 ]
 REPAIR_HINT = re.compile(
-    r"修|錯誤|失败|失敗|error|traceback|runtimeerror|cuda|driver|blocked|fix|repair|fail",
+    r"修|錯誤|失败|失敗|error|traceback|runtimeerror|cuda|driver|blocked|fix|repair|fail|"
+    r"physxjointapi|physxschema|add_joint_schemas|applyapi",
     re.I,
 )
+PHYSX_HINT = re.compile(r"physxjointapi|physxschema|add_joint_schemas|cannot find a valid schema", re.I)
 TAG_RE = re.compile(r"<think>|</think>|<tool_call>|</tool_call>")
 
 
@@ -160,8 +164,12 @@ class Agent:
             "VisualizerCfg/VideoRecorderCfg, --checkpoint latest|best. If unsure, search instead of guessing, and cite URLs.\n\n"
             "When the learner reports a failed run, asks to 修復/fix an error, or pastes a Traceback: "
             "1) call read_run_log (or use the Latest run block below), 2) if the error mentions CUDA/driver/torch call diagnose_runtime, "
-            "3) if diagnose reports torch/driver mismatch call repair_isaaclab_cuda, 4) for example.py bugs use propose_code, "
-            "5) then start_run to verify. Do NOT ask which lesson — you already know it from context. Never reply that you cannot understand a fix request.\n\n"
+            "3) if diagnose reports torch/driver mismatch call repair_isaaclab_cuda, "
+            "4) if the error mentions PhysxJointAPI / PhysxSchema / ApplyAPI call repair_physx_joint (kitless URDF; NOT an example.py string search), "
+            "5) if No module named 'isaacsim' call repair_isaaclab_importers, "
+            "6) for real example.py bugs use propose_code, 7) then start_run to verify. "
+            "Do NOT ask which lesson — you already know it from context. Never reply that you cannot understand a fix request. "
+            "Never answer a runtime Traceback with only「example.py 裡沒有這個字串」— that means you used /code instead of repairing.\n\n"
             "Always start your reply with your reasoning inside <think></think>, then the answer. "
             "You have tools. To call one, emit exactly: <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call> and stop; the result arrives in a "
             "<tool_response> message, after which you continue. Never fabricate tool results. Use propose_code for any code change (full file), "
@@ -219,7 +227,7 @@ class Agent:
         if force_tools:
             yield from OfflineTutor(self).respond(
                 uid, lesson, context, message,
-                note="以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers）。",
+                note="以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。",
             )
             return
         if self.llm is not None and self.llm.chat_ready():
@@ -292,6 +300,8 @@ class Agent:
                 return self._repair_isaaclab_cuda(), events
             if name == "repair_isaaclab_importers":
                 return self._repair_isaaclab_importers(), events
+            if name == "repair_physx_joint":
+                return self._repair_physx_joint(), events
             if name == "propose_code":
                 code = str(arguments.get("code", ""))
                 if not code.strip():
@@ -429,6 +439,14 @@ class Agent:
                         if imp.returncode != 0:
                             info["issues"].append("URDF importer missing (No module named 'isaacsim') — need uv sync --extra importers")
                             info["hints"].append("Call repair_isaaclab_importers (standalone isaacsim-asset-isolated; full Isaac Sim not required for newton_mjwarp)")
+                        else:
+                            stamp = root / ".q1_store_physx_joint_patch"
+                            info["physx_joint_patch"] = stamp.is_file()
+                            if not stamp.is_file():
+                                info["hints"].append(
+                                    "Kitless PhysxJointAPI guard missing — call repair_physx_joint "
+                                    "or: bash scripts/repair_isaaclab_physx_joint.sh"
+                                )
                     except Exception as exc:
                         info["issues"].append(f"urdf importer probe failed: {exc}")
                 except Exception as exc:
@@ -488,6 +506,32 @@ class Agent:
             result["note"] = "Importers installed. Re-run the lesson; URDF→USD no longer needs full Isaac Sim."
         return result
 
+    def _repair_physx_joint(self):
+        script = Path(self.t.root) / "scripts" / "repair_isaaclab_physx_joint.sh"
+        if not script.is_file():
+            return {"ok": False, "error": f"missing {script}"}
+        root = self.t.isaaclab3_root
+        cmd = ["bash", str(script)]
+        if root:
+            cmd.append(str(root))
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "physx joint patch timed out"}
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or ""))[-4000:]
+        ok = proc.returncode == 0
+        result = {
+            "ok": ok,
+            "exit_code": proc.returncode,
+            "log": out,
+            "note": (
+                "Kitless PhysxJointAPI guard applied (venv importer_utils). "
+                "Tutorial launches also use lab3_runner + sitecustomize so old drafts without "
+                "lab3_compat still work. Re-run the lesson."
+            ),
+        }
+        return result
+
     # ---------------------------------------------------------- code accept
     def accept_proposal(self, uid, lesson_id, proposal_id):
         for m in self.t.select("messages", k1=uid, k2=lesson_id):
@@ -526,7 +570,21 @@ class OfflineTutor:
         answer_parts, reasoning = [], []
         lowered = message.strip()
         cmd, _, rest = lowered.partition(" ")
+        last_err = f"{(context.get('last_run') or {}).get('error') or ''} {(context.get('last_run') or {}).get('log_tail') or ''}"
         wants_fix = bool(REPAIR_HINT.search(message)) or bool((context.get("last_run") or {}).get("error"))
+        physx_in_msg = bool(PHYSX_HINT.search(message)) or bool(PHYSX_HINT.search(last_err))
+        # /code PhysxJointAPI must not become「example.py 裡沒有這個字串」— route to repair.
+        if cmd == "/code" and (physx_in_msg or PHYSX_HINT.search(rest) or wants_fix and PHYSX_HINT.search(rest + last_err)):
+            yield from self._repair_flow(
+                uid, lesson, context, answer_parts, reasoning,
+                do_repair=True, message=message,
+            )
+            text = "\n\n".join(answer_parts)
+            for chunk in re.findall(r".{1,120}(?:\s|$)", text, re.S) or [text]:
+                yield {"type": "token", "text": chunk}
+            saved = self.t.append_message(uid, lesson["id"], "assistant", text, reasoning="\n".join(reasoning), mode="offline")
+            yield {"type": "done", "message_id": saved["id"], "mode": "offline"}
+            return
         if cmd in ("/search", "/arxiv", "/youtube", "/fetch"):
             tool = {"/search": "web_search", "/arxiv": "arxiv_search", "/youtube": "youtube_search", "/fetch": "fetch_url"}[cmd]
             args = {"url": rest.strip()} if tool == "fetch_url" else {"query": rest.strip()}
@@ -573,13 +631,27 @@ class OfflineTutor:
                 answer_parts.append(f"無法執行：{result.get('error')}")
         elif cmd == "/code":
             code = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
-            hits = [f"L{i + 1}: {line.strip()}" for i, line in enumerate(code.splitlines()) if rest.strip() and rest.strip().lower() in line.lower()]
-            answer_parts.append(("在 example.py 找到：\n```\n" + "\n".join(hits[:30]) + "\n```") if hits else "example.py 裡沒有這個字串。")
+            needle = rest.strip()
+            if needle and PHYSX_HINT.search(needle):
+                yield from self._repair_flow(uid, lesson, context, answer_parts, reasoning, do_repair=True, message=message)
+            else:
+                hits = [f"L{i + 1}: {line.strip()}" for i, line in enumerate(code.splitlines()) if needle and needle.lower() in line.lower()]
+                answer_parts.append(("在 example.py 找到：\n```\n" + "\n".join(hits[:30]) + "\n```") if hits else "example.py 裡沒有這個字串。")
         elif cmd == "/remember":
             self.t.memory_add(uid, [rest.strip()])
             answer_parts.append("已記住。")
-        elif cmd in ("/log", "/diagnose", "/fix") or (wants_fix and cmd not in self.COMMANDS):
-            yield from self._repair_flow(uid, lesson, context, answer_parts, reasoning, do_repair=(cmd == "/fix" or "修" in message or "fix" in message.lower() or "repair" in message.lower()))
+        elif cmd in ("/log", "/diagnose", "/fix") or physx_in_msg or (wants_fix and cmd not in self.COMMANDS):
+            yield from self._repair_flow(
+                uid, lesson, context, answer_parts, reasoning,
+                do_repair=(
+                    cmd == "/fix"
+                    or physx_in_msg
+                    or "修" in message
+                    or "fix" in message.lower()
+                    or "repair" in message.lower()
+                ),
+                message=message,
+            )
         elif cmd == "/help" or not lesson.get("markdown"):
             answer_parts.append(self.help_text(lesson))
         else:
@@ -606,7 +678,7 @@ class OfflineTutor:
         saved = self.t.append_message(uid, lesson["id"], "assistant", text, reasoning="\n".join(reasoning), mode="offline")
         yield {"type": "done", "message_id": saved["id"], "mode": "offline"}
 
-    def _repair_flow(self, uid, lesson, context, answer_parts, reasoning, do_repair=False):
+    def _repair_flow(self, uid, lesson, context, answer_parts, reasoning, do_repair=False, message=""):
         reasoning.append("讀取最近執行紀錄並診斷 runtime")
         yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
         yield {"type": "tool_call", "name": "read_run_log", "arguments": {}}
@@ -635,13 +707,17 @@ class OfflineTutor:
             + (("\n".join(f"- 提示：{h}" for h in hints)) if hints else "")
         )
 
-        err_blob = f"{log_info.get('error') or ''} {log_info.get('log_tail') or ''}".lower()
-        needs_cuda = any(k in err_blob for k in ("cuda", "driver", "12080", "cu130")) or any("torch" in i.lower() or "cuda" in i.lower() for i in issues)
+        err_blob = f"{log_info.get('error') or ''} {log_info.get('log_tail') or ''}"
+        err_l = err_blob.lower()
+        needs_cuda = any(k in err_l for k in ("cuda", "driver", "12080", "cu130")) or any("torch" in i.lower() or "cuda" in i.lower() for i in issues)
         needs_importers = (
-            "no module named 'isaacsim'" in err_blob
+            "no module named 'isaacsim'" in err_l
             or "urdf importer" in " ".join(issues).lower()
             or not ((diag.get("urdf_importer") or {}).get("ok", True))
         )
+        needs_physx = bool(PHYSX_HINT.search(err_blob)) or bool(PHYSX_HINT.search(message or ""))
+        repaired_ok = False
+
         if do_repair and needs_cuda:
             reasoning.append("偵測到 CUDA/driver 不符，執行 repair_isaaclab_cuda")
             yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
@@ -649,7 +725,8 @@ class OfflineTutor:
             repaired, _ = self.agent.run_tool(uid, lesson, context, "repair_isaaclab_cuda", {})
             yield {"type": "tool_result", "name": "repair_isaaclab_cuda", "result": self.agent.summarize(repaired)}
             if repaired.get("ok"):
-                answer_parts.append("已將 Isaac Lab 的 torch 對齊本機 driver。請再按「執行」驗證。")
+                repaired_ok = True
+                answer_parts.append("已將 Isaac Lab 的 torch 對齊本機 driver。")
             else:
                 answer_parts.append(f"自動修復失敗：{repaired.get('error') or repaired.get('log')}")
         elif needs_cuda:
@@ -662,10 +739,10 @@ class OfflineTutor:
             repaired, _ = self.agent.run_tool(uid, lesson, context, "repair_isaaclab_importers", {})
             yield {"type": "tool_result", "name": "repair_isaaclab_importers", "result": self.agent.summarize(repaired)}
             if repaired.get("ok"):
+                repaired_ok = True
                 answer_parts.append(
                     "已安裝 **isaaclab[importers]**（`isaacsim-asset-isolated`）。"
                     "這不是完整 Isaac Sim；`physics=newton_mjwarp` 用 URDF 時需要它。"
-                    "請再按「執行」。"
                 )
             else:
                 answer_parts.append(f"安裝 importers 失敗：{repaired.get('error') or repaired.get('log')}")
@@ -674,7 +751,43 @@ class OfflineTutor:
                 "錯誤是 **`No module named 'isaacsim'`**：Lab 3 的 URDF→USD 需要 "
                 "`uv sync --extra importers`。輸入 `/fix` 自動安裝，或手動在 `Q1_ISAACLAB3_ROOT` 執行該指令。"
             )
-        elif not needs_cuda:
+
+        if do_repair and needs_physx:
+            reasoning.append("偵測到 PhysxJointAPI / schema 錯誤，執行 repair_physx_joint（非 example.py 字串問題）")
+            yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+            yield {"type": "tool_call", "name": "repair_physx_joint", "arguments": {}}
+            repaired, _ = self.agent.run_tool(uid, lesson, context, "repair_physx_joint", {})
+            yield {"type": "tool_result", "name": "repair_physx_joint", "result": self.agent.summarize(repaired)}
+            if repaired.get("ok"):
+                repaired_ok = True
+                answer_parts.append(
+                    "這是 **kitless URDF importer** 的 `PhysxJointAPI` 問題（完整 Isaac Sim 才有該 schema），"
+                    "不是 example.py 缺字串。已套用 venv 防護，且課程啟動會經 `lab3_runner` 自動 patch。"
+                )
+            else:
+                answer_parts.append(f"PhysxJointAPI 修復失敗：{repaired.get('error') or repaired.get('log')}")
+        elif needs_physx:
+            answer_parts.append(
+                "錯誤是 **`PhysxJointAPI` schema 未註冊**（kitless / `newton_mjwarp` 常見）。"
+                "輸入 `/fix` 自動修，或手動：`bash scripts/repair_isaaclab_physx_joint.sh`。"
+            )
+
+        if do_repair and repaired_ok:
+            reasoning.append("修復完成，自動重跑課程驗證")
+            yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+            yield {"type": "tool_call", "name": "start_run", "arguments": {}}
+            rerun, events = self.agent.run_tool(uid, lesson, context, "start_run", {})
+            for e in events:
+                yield e
+            yield {"type": "tool_result", "name": "start_run", "result": self.agent.summarize(rerun)}
+            if rerun.get("ok"):
+                answer_parts.append(
+                    f"已自動重跑 `{rerun['run_id'][:8]}`（{rerun.get('runtime')}），狀態：{rerun.get('state')}。"
+                    + (f"\n\n{rerun['error']}" if rerun.get("error") else " 請看右側執行進度。")
+                )
+            else:
+                answer_parts.append(f"自動重跑失敗：{rerun.get('error')}")
+        elif not needs_cuda and not needs_importers and not needs_physx:
             answer_parts.append("若錯誤在 example.py，請貼出關鍵行或輸入 `/code <關鍵字>`；修好後用 `/run` 再跑一次。")
 
     @staticmethod

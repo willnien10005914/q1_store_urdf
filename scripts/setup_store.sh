@@ -216,6 +216,14 @@ setup_isaaclab() {
           MISSING=1
         fi
       fi
+      if [[ -x "$ROOT/scripts/repair_isaaclab_physx_joint.sh" ]]; then
+        if bash "$ROOT/scripts/repair_isaaclab_physx_joint.sh" --check "$root" >/dev/null 2>&1; then
+          ok "PhysxJointAPI kitless guard present"
+        else
+          need "PhysxJointAPI patch — run: bash scripts/repair_isaaclab_physx_joint.sh"
+          MISSING=1
+        fi
+      fi
     else
       need "clone $ISAAC_REPO @$ISAAC_TAG → $ISAAC_DEFAULT (do not reuse ~/IsaacLab 2.x)"
       MISSING=1
@@ -259,6 +267,11 @@ setup_isaaclab() {
     if [[ -x "$ROOT/scripts/repair_isaaclab_cuda.sh" ]]; then
       log "aligning Isaac Lab torch with NVIDIA driver"
       bash "$ROOT/scripts/repair_isaaclab_cuda.sh" "$root" || die "torch/CUDA repair failed"
+    fi
+    # Kitless newton_mjwarp: PhysxJointAPI schema may be unregistered — guard AddAPI.
+    if [[ -x "$ROOT/scripts/repair_isaaclab_physx_joint.sh" ]]; then
+      log "guarding kitless PhysxJointAPI in URDF importer"
+      bash "$ROOT/scripts/repair_isaaclab_physx_joint.sh" "$root" || die "PhysxJointAPI patch failed"
     fi
   fi
 
