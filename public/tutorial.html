@@ -50,6 +50,16 @@
     </div>
   </div>
 
+  <div class="tut-layout-bar" id="layout-bar" role="toolbar" aria-label="版面調整">
+    <span class="tut-layout-bar-label">三欄版面</span>
+    <button type="button" class="text-link" data-layout="default" title="還原預設寬度">預設</button>
+    <button type="button" class="text-link" data-layout="equal" title="左／中／右平均寬度">平均</button>
+    <button type="button" class="text-link" data-layout="expand-side" title="加寬左側課程欄">展開左欄</button>
+    <button type="button" class="text-link" data-layout="expand-main" title="加寬中間課程區">展開中欄</button>
+    <button type="button" class="text-link" data-layout="expand-agent" title="加寬右側 Hermes">展開右欄</button>
+    <span class="tut-layout-bar-hint">也可拖左右邊緣；雙擊把手可展開該欄</span>
+  </div>
+
   <div class="tut-layout">
     <aside class="tut-side" id="sidebar">
       <div class="tut-pane-resize tut-pane-resize-end" id="resize-side" role="separator" aria-orientation="vertical" aria-label="調整左側欄寬度" title="拖曳調整左側欄寬度"></div>
@@ -144,7 +154,7 @@
                 <button type="button" class="button secondary" id="resume-btn" hidden>續訓</button>
               </div>
               <div class="tut-run-status" id="run-status" hidden></div>
-              <div class="tut-media" id="run-media"></div>
+              <div class="tut-run-media" id="run-media"></div>
             </div>
           </div>
         </div>

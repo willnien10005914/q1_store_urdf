@@ -190,6 +190,53 @@ class AgentTests(unittest.TestCase):
         done = next(e for e in events if e.get("type") == "done")
         self.assertEqual(done.get("mode"), "offline")
 
+    def _seed_complete_run(self, lesson_id="l07-visualizers-and-recording", robot="wheel"):
+        import uuid
+        run_id = uuid.uuid4().hex
+        directory = self.t.run_dir(run_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        result = {"ok": True, "physics": "fallback", "frames": 10, "survived": True, "message": "seeded"}
+        (directory / "result.json").write_text(json.dumps(result), encoding="utf-8")
+        (directory / "evaluation.json").write_text(json.dumps({"passed": True, "score": 1.0}), encoding="utf-8")
+        (directory / "rollout.json").write_text(json.dumps({
+            "fps": 10, "joint_names": ["j0"], "frames": [{"t": 0.0, "q": [0.1]}, {"t": 0.1, "q": [0.2]}],
+        }), encoding="utf-8")
+        (directory / "result.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+        (directory / "run.log").write_text("seeded run\n", encoding="utf-8")
+        run = {
+            "id": run_id, "user_id": self.uid, "lesson_id": lesson_id, "lesson_title": "seed",
+            "robot": robot, "params": {}, "code_sha256": "0" * 64, "code_modified": False,
+            "runtime": {"mode": "python-fallback", "label": "python"}, "trainable": False, "resumable": False,
+            "state": "complete", "phase": "complete", "progress": {"phase": "complete"}, "result": result,
+            "error": None, "pid": None, "created_at": "2026-10-31T00:00:00Z", "started_at": "2026-10-31T00:00:00Z",
+            "finished_at": "2026-10-31T00:00:01Z", "resumed": 0,
+        }
+        self.t.put("runs", run, k1=self.uid, k2=lesson_id)
+        return run_id
+
+    def test_analyze_run_reads_artifacts(self):
+        lesson = self.t.lesson("l07-visualizers-and-recording", robot="wheel", user_id=self.uid)
+        run_id = self._seed_complete_run()
+        info, _ = self.agent.run_tool(self.uid, lesson, {"robot": "wheel", "last_run": {"id": run_id}}, "analyze_run", {})
+        self.assertTrue(info.get("ok"), info)
+        self.assertIn("rollout.json", info.get("files") or [])
+        self.assertIn("result.mp4", info.get("files") or [])
+        self.assertTrue(info.get("video_url"))
+        self.assertTrue(info.get("rollout_url"))
+        self.assertTrue((info.get("evaluation") or {}).get("passed"))
+        self.assertIn("summary", info)
+
+    def test_offline_analyze_command(self):
+        lesson = self.t.lesson("l07-visualizers-and-recording", robot="wheel", user_id=self.uid)
+        run_id = self._seed_complete_run()
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "請分析結果",
+            {"robot": "wheel", "params": {}, "last_run": {"id": run_id}},
+        ))
+        self.assertTrue(any(e.get("name") == "analyze_run" for e in events if e.get("type") == "tool_call"))
+        tokens = "".join(e.get("text", "") for e in events if e.get("type") == "token")
+        self.assertIn("執行分析", tokens)
+
 
 class TutorialHTTPTests(unittest.TestCase):
     @classmethod

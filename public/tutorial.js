@@ -1,14 +1,18 @@
 import {initI18n, getLocale, L, t, setLocale, applyI18n} from './i18n.js';
 import {renderMarkdown} from './markdown.js';
+import {createRobotViewer} from './robot-viewer.js';
 
 const USER_KEY = 'q1-tutorial-user';
 const ROBOT_KEY = 'q1-tutorial-robot';
 const LAYOUT_KEY = 'q1-tutorial-layout';
 const SIDE_FOLD_KEY = 'q1-tutorial-side-folds';
 const SIDE_MIN = 160;
-const SIDE_MAX = 480;
+const SIDE_MAX = 920;
 const AGENT_MIN = 240;
-const AGENT_MAX = 560;
+const AGENT_MAX = 1000;
+const SIDE_DEFAULT = 240;
+const AGENT_DEFAULT = 340;
+const MAIN_MIN = 280;
 const $ = (id) => document.getElementById(id);
 
 function loadLayoutPrefs() {
@@ -22,6 +26,7 @@ function saveLayoutPrefs() {
   localStorage.setItem(LAYOUT_KEY, JSON.stringify({
     sideWidth: state.sideWidth,
     agentWidth: state.agentWidth,
+    preset: state.layoutPreset || 'custom',
   }));
 }
 function loadSideFolds() {
@@ -67,12 +72,15 @@ const state = {
   codeEditTimer: null,
   codeWide: false,   // widen code vs params inside .tut-lab
   codeFocus: false,  // hide left lesson nav + right Hermes (full-bleed code)
-  sideWidth: Number(loadLayoutPrefs().sideWidth) || 240,
-  agentWidth: Number(loadLayoutPrefs().agentWidth) || 340,
+  sideWidth: Number(loadLayoutPrefs().sideWidth) || SIDE_DEFAULT,
+  agentWidth: Number(loadLayoutPrefs().agentWidth) || AGENT_DEFAULT,
+  layoutPreset: loadLayoutPrefs().preset || 'custom',
   runBusy: false,
   runId: null,
   lastRun: null,
   runPoll: null,
+  rolloutPlayer: null,
+  robotManifest: null,
   llm: null,
   pendingProposal: null,
   pendingDiff: null,
@@ -96,20 +104,98 @@ function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
 
+function layoutBudget() {
+  const layout = layoutEl();
+  if (!layout) return {width: 1200, gap: 16};
+  const rect = layout.getBoundingClientRect();
+  return {width: rect.width || Math.min(window.innerWidth - 48, 1920), gap: 16};
+}
+
+function paneCaps() {
+  const {width, gap} = layoutBudget();
+  const usable = Math.max(MAIN_MIN + SIDE_MIN + AGENT_MIN, width - gap * 2);
+  // Allow either side to grow far outward; the other pane + main keep a floor.
+  const maxSide = Math.min(SIDE_MAX, Math.max(SIDE_MIN, usable - AGENT_MIN - MAIN_MIN));
+  const maxAgent = Math.min(AGENT_MAX, Math.max(AGENT_MIN, usable - SIDE_MIN - MAIN_MIN));
+  return {maxSide, maxAgent, usable, gap, width};
+}
+
 function applyPaneWidths() {
   const layout = layoutEl();
+  const page = pageEl();
   if (!layout) return;
-  const side = clamp(Math.round(state.sideWidth || 240), SIDE_MIN, SIDE_MAX);
-  const agent = clamp(Math.round(state.agentWidth || 340), AGENT_MIN, AGENT_MAX);
-  state.sideWidth = side;
-  state.agentWidth = agent;
-  layout.style.setProperty('--tut-side-w', `${side}px`);
-  layout.style.setProperty('--tut-agent-w', `${agent}px`);
+  const {maxSide, maxAgent} = paneCaps();
+  const side = clamp(Math.round(state.sideWidth || SIDE_DEFAULT), SIDE_MIN, maxSide);
+  const agent = clamp(Math.round(state.agentWidth || AGENT_DEFAULT), AGENT_MIN, maxAgent);
+  // If both exceed the viewport, shrink the opposite of the last drag preferentially via ratio.
+  let nextSide = side;
+  let nextAgent = agent;
+  const {usable} = paneCaps();
+  if (nextSide + nextAgent + MAIN_MIN > usable) {
+    const overflow = nextSide + nextAgent + MAIN_MIN - usable;
+    const sideShare = nextSide / Math.max(1, nextSide + nextAgent);
+    nextSide = clamp(Math.round(nextSide - overflow * sideShare), SIDE_MIN, maxSide);
+    nextAgent = clamp(Math.round(usable - MAIN_MIN - nextSide), AGENT_MIN, maxAgent);
+  }
+  state.sideWidth = nextSide;
+  state.agentWidth = nextAgent;
+  layout.style.setProperty('--tut-side-w', `${nextSide}px`);
+  layout.style.setProperty('--tut-agent-w', `${nextAgent}px`);
   if (state.codeFocus) {
     layout.style.removeProperty('grid-template-columns');
   } else {
-    layout.style.gridTemplateColumns = `${side}px minmax(0,1fr) ${agent}px`;
+    layout.style.gridTemplateColumns = `${nextSide}px minmax(0,1fr) ${nextAgent}px`;
   }
+  const wide = nextSide >= 360 || nextAgent >= 420 || nextSide + nextAgent >= 700;
+  page?.classList.toggle('is-wide-panes', wide && !state.codeFocus);
+  syncLayoutBar();
+}
+
+function syncLayoutBar() {
+  const bar = $('layout-bar');
+  if (!bar) return;
+  bar.querySelectorAll('[data-layout]').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.layout === state.layoutPreset);
+  });
+}
+
+function setLayoutPreset(name) {
+  const {usable, maxSide, maxAgent} = paneCaps();
+  state.layoutPreset = name;
+  if (name === 'default') {
+    state.sideWidth = SIDE_DEFAULT;
+    state.agentWidth = AGENT_DEFAULT;
+  } else if (name === 'equal') {
+    const each = Math.floor(usable / 3);
+    state.sideWidth = clamp(each, SIDE_MIN, maxSide);
+    state.agentWidth = clamp(each, AGENT_MIN, maxAgent);
+  } else if (name === 'expand-side') {
+    state.sideWidth = maxSide;
+    state.agentWidth = clamp(state.agentWidth, AGENT_MIN, Math.min(maxAgent, usable - maxSide - MAIN_MIN));
+  } else if (name === 'expand-main') {
+    const side = clamp(Math.round(usable * 0.16), SIDE_MIN, 220);
+    const agent = clamp(Math.round(usable * 0.22), AGENT_MIN, 300);
+    state.sideWidth = side;
+    state.agentWidth = agent;
+  } else if (name === 'expand-agent') {
+    state.agentWidth = maxAgent;
+    state.sideWidth = clamp(state.sideWidth, SIDE_MIN, Math.min(maxSide, usable - maxAgent - MAIN_MIN));
+  }
+  applyPaneWidths();
+  saveLayoutPrefs();
+}
+
+function wireLayoutBar() {
+  const bar = $('layout-bar');
+  if (!bar) return;
+  bar.querySelectorAll('[data-layout]').forEach((btn) => {
+    btn.addEventListener('click', () => setLayoutPreset(btn.dataset.layout));
+  });
+  window.addEventListener('resize', () => {
+    if (state.codeFocus || window.matchMedia('(max-width: 1100px)').matches) return;
+    applyPaneWidths();
+  });
+  syncLayoutBar();
 }
 
 function syncLayoutChrome() {
@@ -161,9 +247,11 @@ function wirePaneResize() {
     const handle = $(handleId);
     if (!handle) return;
     let dragging = false;
+    let moved = false;
     handle.addEventListener('pointerdown', (e) => {
       if (state.codeFocus || window.matchMedia('(max-width: 1100px)').matches) return;
       dragging = true;
+      moved = false;
       handle.classList.add('is-active');
       layout.classList.add('is-pane-resizing');
       handle.setPointerCapture(e.pointerId);
@@ -171,15 +259,18 @@ function wirePaneResize() {
     });
     handle.addEventListener('pointermove', (e) => {
       if (!dragging) return;
+      moved = true;
       const rect = layout.getBoundingClientRect();
-      const gap = 16;
+      const {maxSide, maxAgent} = paneCaps();
+      // Cap against the *other* pane + main floor so either side can grow outward.
       if (which === 'side') {
-        const maxSide = Math.min(SIDE_MAX, rect.width - state.agentWidth - gap * 2 - 320);
-        state.sideWidth = clamp(e.clientX - rect.left, SIDE_MIN, Math.max(SIDE_MIN, maxSide));
+        const room = Math.max(SIDE_MIN, rect.width - state.agentWidth - 16 * 2 - MAIN_MIN);
+        state.sideWidth = clamp(e.clientX - rect.left, SIDE_MIN, Math.min(maxSide, room));
       } else {
-        const maxAgent = Math.min(AGENT_MAX, rect.width - state.sideWidth - gap * 2 - 320);
-        state.agentWidth = clamp(rect.right - e.clientX, AGENT_MIN, Math.max(AGENT_MIN, maxAgent));
+        const room = Math.max(AGENT_MIN, rect.width - state.sideWidth - 16 * 2 - MAIN_MIN);
+        state.agentWidth = clamp(rect.right - e.clientX, AGENT_MIN, Math.min(maxAgent, room));
       }
+      state.layoutPreset = 'custom';
       applyPaneWidths();
     });
     const stop = () => {
@@ -187,10 +278,15 @@ function wirePaneResize() {
       dragging = false;
       handle.classList.remove('is-active');
       layout.classList.remove('is-pane-resizing');
-      saveLayoutPrefs();
+      if (moved) saveLayoutPrefs();
     };
     handle.addEventListener('pointerup', stop);
     handle.addEventListener('pointercancel', stop);
+    handle.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      if (state.codeFocus || window.matchMedia('(max-width: 1100px)').matches) return;
+      setLayoutPreset(which === 'side' ? 'expand-side' : 'expand-agent');
+    });
   };
 
   bind('resize-side', 'side');
@@ -653,7 +749,9 @@ async function openLesson(id) {
   loadHistory();
   loadRuns();
   $('run-status').hidden = true;
-  $('run-media').innerHTML = '';
+  stopRolloutPlayer();
+  const media = $('run-media');
+  if (media) { media.innerHTML = ''; delete media.dataset.mediaSig; }
   $('cancel-btn').hidden = true;
   $('resume-btn').hidden = true;
 }
@@ -782,12 +880,19 @@ function showRun(run) {
   if (p.iteration != null && p.max_iterations) statusLines.push(`progress: ${p.iteration}/${p.max_iterations}`);
   if (run.error) statusLines.push(run.error);
   const shownLog = [...statusLines, ...logLines].slice(-40);
+  const files = run.files || [];
   state.lastRun = {
     id: run.id,
     state: run.state,
     error: run.error || null,
     log_tail: logLines.slice(-60).join('\n'),
     runtime: run.runtime?.label || null,
+    files,
+    result: run.result || null,
+    evaluation: run.evaluation || null,
+    media_url: run.media_url || `/media/tutorial/${run.id}/`,
+    has_video: files.includes('result.mp4'),
+    has_rollout: files.includes('rollout.json'),
   };
   el.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><strong>${escapeHtml(statusLabel(run.state))}</strong><span>${escapeHtml(run.runtime?.label || '')}</span></div>
     <div style="font-size:10px;color:#8a8a92;margin-top:4px">${escapeHtml(run.id.slice(0, 8))} · pid ${run.pid || '—'}</div>
@@ -796,15 +901,139 @@ function showRun(run) {
     <div class="log">${shownLog.length ? shownLog.map(escapeHtml).join('\n') : (getLocale()==='en'?'(no log yet)':'(尚無 log — 啟動後會出現在這裡)')}</div>`;
   $('cancel-btn').hidden = !busy;
   $('resume-btn').hidden = !run.can_resume;
-  const media = $('run-media');
-  media.innerHTML = '';
-  if (run.files?.includes('result.mp4')) {
-    media.innerHTML = `<video controls src="/media/tutorial/${run.id}/result.mp4"></video>`;
-  } else if (run.files?.includes('rollout.json')) {
-    media.innerHTML = `<p style="font-size:11px;color:#666;margin-top:8px"><a class="text-link" href="/media/tutorial/${run.id}/rollout.json" target="_blank">rollout.json</a> — 可在瀏覽器重播（Three.js）</p>`;
-  }
+  renderRunMedia(run);
   if (run.result) {
     el.insertAdjacentHTML('beforeend', `<pre style="margin-top:8px;font-size:10px;overflow:auto">${escapeHtml(JSON.stringify(run.result, null, 2).slice(0, 1200))}</pre>`);
+  }
+  if (run.evaluation) {
+    el.insertAdjacentHTML('beforeend', `<pre style="margin-top:8px;font-size:10px;overflow:auto">${escapeHtml(JSON.stringify(run.evaluation, null, 2).slice(0, 800))}</pre>`);
+  }
+}
+
+function stopRolloutPlayer() {
+  const player = state.rolloutPlayer;
+  if (!player) return;
+  if (player.raf) cancelAnimationFrame(player.raf);
+  player.viewer?.dispose?.();
+  state.rolloutPlayer = null;
+}
+
+function frameTime(frame) {
+  const t = frame?.t ?? frame?.time;
+  return Number.isFinite(t) ? t : 0;
+}
+
+async function ensureRobotManifest(robotId) {
+  if (!state.robotManifest) {
+    const data = await fetch('/assets/robots/manifest.json').then((r) => r.json());
+    state.robotManifest = data.robots || data;
+  }
+  const list = Array.isArray(state.robotManifest) ? state.robotManifest : (state.robotManifest.robots || []);
+  return list.find((r) => r.id === (robotId || state.robot)) || list[0];
+}
+
+function renderRunMedia(run) {
+  const media = $('run-media');
+  if (!media) return;
+  const files = run.files || [];
+  const hasVideo = files.includes('result.mp4');
+  const hasRollout = files.includes('rollout.json');
+  const signature = `${run.id}|${hasVideo ? 'v' : ''}|${hasRollout ? 'r' : ''}`;
+  // Polling calls showRun often — keep the video/rollout player mounted.
+  if (media.dataset.mediaSig === signature) return;
+  stopRolloutPlayer();
+  media.innerHTML = '';
+  media.dataset.mediaSig = signature;
+  if (!hasVideo && !hasRollout) return;
+
+  if (hasVideo) {
+    const video = document.createElement('video');
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.src = `/media/tutorial/${run.id}/result.mp4`;
+    media.appendChild(video);
+  }
+
+  if (hasRollout) {
+    const player = document.createElement('div');
+    player.className = 'tut-rollout-player';
+    player.innerHTML = `
+      <div class="tut-rollout-stage" id="rollout-stage"></div>
+      <div class="tut-rollout-toolbar">
+        <button type="button" class="button secondary" id="rollout-play">${getLocale() === 'en' ? 'Play rollout' : '播放 rollout'}</button>
+        <a class="text-link" href="/media/tutorial/${run.id}/rollout.json" target="_blank" rel="noopener">rollout.json</a>
+        <span class="muted" id="rollout-status">${hasVideo ? (getLocale() === 'en' ? '3D joint replay' : '3D 關節重播') : (getLocale() === 'en' ? 'No mp4 — play joints here' : '無 mp4 — 在此重播關節')}</span>
+      </div>`;
+    media.appendChild(player);
+    const playBtn = player.querySelector('#rollout-play');
+    playBtn.addEventListener('click', () => toggleRolloutPlayback(run, playBtn, player.querySelector('#rollout-status'), player.querySelector('#rollout-stage')));
+  }
+}
+
+async function toggleRolloutPlayback(run, playBtn, statusEl, stageEl) {
+  if (state.rolloutPlayer?.playing) {
+    state.rolloutPlayer.playing = false;
+    if (state.rolloutPlayer.raf) cancelAnimationFrame(state.rolloutPlayer.raf);
+    state.rolloutPlayer.raf = null;
+    playBtn.textContent = getLocale() === 'en' ? 'Play rollout' : '播放 rollout';
+    return;
+  }
+  playBtn.disabled = true;
+  try {
+    if (!state.rolloutPlayer?.viewer || state.rolloutPlayer.runId !== run.id) {
+      stopRolloutPlayer();
+      stageEl.replaceChildren();
+      const viewer = await createRobotViewer(stageEl, {
+        onStatus: (msg) => { if (statusEl) statusEl.textContent = msg; },
+      });
+      const entry = await ensureRobotManifest(run.robot || state.robot);
+      if (!entry) throw Error(getLocale() === 'en' ? 'Robot URDF not found.' : '找不到機器人 URDF。');
+      await viewer.loadRobot(entry);
+      viewer.setPlaying(false);
+      viewer.setRenderingPaused(false);
+      const response = await fetch(`/media/tutorial/${run.id}/rollout.json`);
+      if (!response.ok) throw Error(getLocale() === 'en' ? 'Failed to load rollout.json' : 'rollout.json 載入失敗');
+      const rollout = await response.json();
+      const frames = rollout.frames || [];
+      if (!frames.length) throw Error(getLocale() === 'en' ? 'rollout has no frames' : 'rollout 沒有影格');
+      state.rolloutPlayer = {
+        runId: run.id,
+        viewer,
+        rollout,
+        frames,
+        names: rollout.joint_names || [],
+        playing: false,
+        raf: null,
+      };
+    }
+    const player = state.rolloutPlayer;
+    player.playing = true;
+    playBtn.textContent = getLocale() === 'en' ? 'Stop ■' : '停止 ■';
+    const started = performance.now();
+    const end = frameTime(player.frames[player.frames.length - 1]) + 0.5;
+    const step = () => {
+      if (!state.rolloutPlayer?.playing) return;
+      const t = ((performance.now() - started) / 1000) % Math.max(end, 0.1);
+      let index = player.frames.findIndex((f) => frameTime(f) >= t);
+      if (index < 0) index = player.frames.length - 1;
+      const frame = player.frames[index];
+      const joints = {};
+      (player.names || []).forEach((name, k) => { joints[name] = frame.q?.[k]; });
+      player.viewer.setJoints(joints);
+      if (statusEl) {
+        statusEl.textContent = `rollout · ${frameTime(frame).toFixed(2)} s` +
+          (player.rollout.survived === false ? (getLocale() === 'en' ? ' · ended early' : ' · 回合提前終止') : '');
+      }
+      player.raf = requestAnimationFrame(step);
+    };
+    player.raf = requestAnimationFrame(step);
+  } catch (err) {
+    stopRolloutPlayer();
+    toast(err.message || String(err));
+    playBtn.textContent = getLocale() === 'en' ? 'Play rollout' : '播放 rollout';
+  } finally {
+    playBtn.disabled = false;
   }
 }
 
@@ -1174,6 +1403,7 @@ function wire() {
   });
   wireCodeEditor();
   wirePaneResize();
+  wireLayoutBar();
   wireSideFolds();
   $('run-btn').addEventListener('click', () => startRun().catch((e) => toast(e.message)));
   $('cancel-btn').addEventListener('click', async () => {

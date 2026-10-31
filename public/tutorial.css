@@ -34,8 +34,9 @@
 .resume-card .actions{display:flex;gap:10px;align-items:center;margin-top:4px}
 .resume-card .dismiss{margin-left:auto;font-size:18px;color:#aaa;line-height:1}
 
-.tut-page{max-width:1440px;margin:0 auto;padding:18px 24px 60px;transition:max-width .25s ease,padding .25s ease}
-.tut-page.is-code-editing{max-width:min(1760px,calc(100vw - 16px))}
+.tut-page{max-width:min(1920px,calc(100vw - 16px));margin:0 auto;padding:18px 24px 60px;transition:max-width .25s ease,padding .25s ease}
+.tut-page.is-code-editing{max-width:min(2200px,calc(100vw - 8px))}
+.tut-page.is-wide-panes{max-width:min(2400px,calc(100vw - 8px));padding-left:12px;padding-right:12px}
 .tut-page.is-code-focus{max-width:none;width:100%;padding-left:10px;padding-right:10px}
 .tut-code-toolbar .text-link[aria-pressed="true"]{color:var(--blue);font-weight:600}
 .tut-restore-dock{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:999px;box-shadow:0 10px 30px rgba(20,20,30,.14);font-size:12px;color:#555}
@@ -50,6 +51,12 @@
 .tut-progress-bar{height:6px;background:#eeeef3;border-radius:999px;overflow:hidden;width:120px}
 .tut-progress-bar>i{display:block;height:100%;background:var(--blue);width:0;transition:width .4s}
 
+.tut-layout-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;padding:8px 12px;background:#fff;border:1px solid var(--line);border-radius:12px;font-size:11px}
+.tut-layout-bar-label{font-weight:700;letter-spacing:.4px;color:#5c5c66;text-transform:uppercase;font-size:10px;margin-right:4px}
+.tut-layout-bar .text-link{font-size:11px}
+.tut-layout-bar .text-link.is-active{color:var(--blue);font-weight:600}
+.tut-layout-bar-hint{margin-left:auto;color:#8a8a92;font-size:10px}
+.tut-page.is-code-focus .tut-layout-bar{display:none}
 .tut-layout{
   --tut-side-w:240px;
   --tut-agent-w:340px;
@@ -161,6 +168,13 @@
 .tut-run-status{margin-top:12px;padding:12px;background:#f8f8fa;border-radius:12px;font-size:11px;line-height:1.6}
 .tut-run-status progress{margin:8px 0;width:100%}
 .tut-run-status .log{max-height:220px;overflow:auto;background:#101216;color:#d7dbe3;border-radius:8px;padding:10px;font:10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;margin-top:8px;min-height:72px}
+.tut-run-media{margin-top:12px;display:flex;flex-direction:column;gap:10px}
+.tut-run-media video{width:100%;max-height:360px;border-radius:12px;background:#101216;border:1px solid #e6e6eb}
+.tut-rollout-player{border:1px solid #e6e6eb;border-radius:12px;overflow:hidden;background:#f5f6f8}
+.tut-rollout-stage{height:280px;position:relative;background:#eef0f4}
+.tut-rollout-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 10px;background:#fff;border-top:1px solid #eeeef3;font-size:11px}
+.tut-rollout-toolbar .button{min-height:30px;padding:6px 12px;font-size:11px}
+.tut-rollout-toolbar .muted{color:#8a8a92;margin-left:auto}
 .tut-page button,.tut-page .button,.tut-page .text-link,.tut-restore-dock .button{
   transition:transform .12s ease,box-shadow .12s ease,background .15s ease,opacity .15s ease,color .15s ease;
 }
@@ -216,6 +230,7 @@
 .diff-box{max-height:280px;overflow:auto;background:#101216;color:#d7dbe3;border-radius:10px;padding:12px;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
 
 @media(max-width:1100px){
+  .tut-layout-bar{display:none}
   .tut-layout,
   .tut-layout.is-code-editing{grid-template-columns:1fr}
   .tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr)}
@@ -223,6 +238,7 @@
   .tut-lab,.tut-lab.is-editing,.tut-lab.is-wide{grid-template-columns:1fr}
   .tut-code-resize,.tut-pane-resize{display:none}
   .tut-restore-dock{left:12px;right:12px;transform:none;justify-content:space-between}
+  .tut-rollout-stage{height:220px}
   .nav-mega-grid{grid-template-columns:repeat(2,1fr)}
   .nav-mega-panel{left:0;transform:none}
 }

@@ -702,7 +702,14 @@ class Tutorial:
             run["progress"] = progress
             run["phase"] = progress.get("phase")
         run["log_tail"] = tail(directory / "run.log", log_lines)
-        run["files"] = sorted(p.name for p in directory.iterdir() if p.is_file() and p.name in MEDIA)
+        run["files"] = sorted(p.name for p in directory.iterdir() if p.is_file() and p.name in MEDIA) if directory.is_dir() else []
+        # Refresh artifacts from disk so Hermes / Lab UI can analyze after the process exits.
+        disk_result = load_json_file(directory / "result.json") if directory.is_dir() else None
+        if disk_result is not None:
+            run["result"] = disk_result
+        disk_eval = load_json_file(directory / "evaluation.json") if directory.is_dir() else None
+        if disk_eval is not None:
+            run["evaluation"] = disk_eval
         run["can_resume"] = run["state"] in ("interrupted", "failed", "complete", "cancelled") and run["resumable"] and (directory / "latest.pt").exists()
         run["media_url"] = f"/media/tutorial/{run_id}/"
         if run.get("state") == "queued" and run["runtime"].get("mode") == "isaaclab3" and not run.get("wait_reason"):

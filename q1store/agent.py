@@ -30,6 +30,8 @@ TOOLS = [
     {"name": "read_example", "description": "Read the current example.py the learner is editing (returns the full source).", "parameters": {"type": "object", "properties": {}}},
     {"name": "read_run_log", "description": "Read the latest (or given) tutorial run error + run.log tail for this lesson. Call this first when the learner says the run failed or asks to fix an error.",
      "parameters": {"type": "object", "properties": {"run_id": {"type": "string"}}, "required": []}},
+    {"name": "analyze_run", "description": "Analyze a completed (or latest) tutorial run: result.json, evaluation.json, progress, media files (result.mp4 / rollout.json), and give a tutor-facing summary. Use when the learner asks about training results, metrics, video, rollout, or inference playback.",
+     "parameters": {"type": "object", "properties": {"run_id": {"type": "string"}}, "required": []}},
     {"name": "diagnose_runtime", "description": "Diagnose Isaac Lab 3 / torch / NVIDIA driver / Hermes GPU / Q1_ISAACLAB3_ROOT. Use when CUDA, driver, uv, or Lab checkout errors appear.",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "repair_isaaclab_cuda", "description": "Repair Isaac Lab 3 torch wheel to match the local NVIDIA driver (e.g. cu130→cu128 on CUDA 12.8 drivers). Safe to call when diagnose_runtime reports a mismatch.",
@@ -54,6 +56,14 @@ TOOLS = [
 REPAIR_HINT = re.compile(
     r"修|錯誤|失败|失敗|error|traceback|runtimeerror|cuda|driver|blocked|fix|repair|fail|"
     r"physxjointapi|physxschema|add_joint_schemas|applyapi",
+    re.I,
+)
+ANALYZE_HINT = re.compile(
+    r"(分析\s*(結果|成果|執行|run)|看結果|解釋結果|/analyze|/result|"
+    r"result\.json|evaluation\.json|評估結果|驗收|"
+    r"(訓練後|跑完|完成後).{0,12}(結果|影片|rollout|推論)|"
+    r"(播放|看).{0,8}(影片|video|mp4|rollout|推論)|"
+    r"\b(analyze|metrics?|inference|rollout|result\.mp4)\b)",
     re.I,
 )
 PHYSX_HINT = re.compile(r"physxjointapi|physxschema|add_joint_schemas|cannot find a valid schema", re.I)
@@ -150,14 +160,26 @@ class Agent:
         last_run = context.get("last_run") or {}
         last_run_blob = ""
         if last_run:
+            result_snip = last_run.get("result")
+            result_text = ""
+            if result_snip is not None:
+                try:
+                    result_text = json.dumps(result_snip, ensure_ascii=False)[:1800]
+                except TypeError:
+                    result_text = str(result_snip)[:1800]
+            files = last_run.get("files") or []
             last_run_blob = (
                 f"Latest run for this lesson: id={last_run.get('id')} state={last_run.get('state')} "
-                f"error={last_run.get('error')!r}\nlog_tail:\n{(last_run.get('log_tail') or '')[:3500]}\n"
+                f"error={last_run.get('error')!r}\n"
+                f"files={files} media_url={last_run.get('media_url')!r} "
+                f"has_video={last_run.get('has_video')} has_rollout={last_run.get('has_rollout')}\n"
+                f"result_json={result_text or '(none — call analyze_run)'}\n"
+                f"log_tail:\n{(last_run.get('log_tail') or '')[:3500]}\n"
             )
         return (
             "You are Hermes, the Q1 Store tutor for Isaac Lab 3.0 and Isaac Sim. You teach by explaining the APIs in the current lesson, "
-            "pointing at exact lines of example.py, proposing concrete edits and parameter changes, diagnosing failed runs, and repairing "
-            "the local Isaac Lab / CUDA environment when needed. "
+            "pointing at exact lines of example.py, proposing concrete edits and parameter changes, diagnosing failed runs, analyzing completed "
+            "run results (metrics, evaluation, result.mp4 / rollout.json), and repairing the local Isaac Lab / CUDA environment when needed. "
             "Answer in the learner's language (Traditional Chinese by default; English if they write English). Be precise about 3.0 facts: "
             "ProxyArray (.torch/.warp), XYZW quaternions, write_*_to_sim_index/_mask, robot.actuators.target_command.set_*_index, "
             "actuator_effort_limit vs joint_effort_limit, launch_simulation, physics=newton_mjwarp|isaacsim_physx|ovphysx, HEADLESS=1 (no --headless), "
@@ -168,12 +190,15 @@ class Agent:
             "4) if the error mentions PhysxJointAPI / PhysxSchema / ApplyAPI call repair_physx_joint (kitless URDF; NOT an example.py string search), "
             "5) if No module named 'isaacsim' call repair_isaaclab_importers, "
             "6) for real example.py bugs use propose_code, 7) then start_run to verify. "
+            "When the learner asks about 結果/影片/rollout/推論/metrics after a run: call analyze_run, summarize metrics honestly, "
+            "and tell them the Lab panel plays result.mp4 (if present) or the Three.js rollout player. "
             "Do NOT ask which lesson — you already know it from context. Never reply that you cannot understand a fix request. "
-            "Never answer a runtime Traceback with only「example.py 裡沒有這個字串」— that means you used /code instead of repairing.\n\n"
+            "Never answer a runtime Traceback with only「example.py 裡沒有這個字串」— that means you used /code instead of repairing. "
+            "Never say you cannot analyze run results — use analyze_run.\n\n"
             "Always start your reply with your reasoning inside <think></think>, then the answer. "
             "You have tools. To call one, emit exactly: <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call> and stop; the result arrives in a "
             "<tool_response> message, after which you continue. Never fabricate tool results. Use propose_code for any code change (full file), "
-            "set_params for slider changes, start_run to execute, propose_course when you discover new Isaac Lab 3 material worth a lesson.\n"
+            "set_params for slider changes, start_run to execute, analyze_run for post-run results, propose_course when you discover new Isaac Lab 3 material worth a lesson.\n"
             f"<tools>{json.dumps(TOOLS, ensure_ascii=False)}</tools>\n\n"
             f"Learner: {progress.get('name')} · level {progress['level']['id']} · {progress['completed']}/{progress['total']} lessons done.\n"
             f"Memory about the learner: {json.dumps(memory, ensure_ascii=False) if memory else 'none yet'}\n"
@@ -202,33 +227,33 @@ class Agent:
             raise APIError("訊息太長。")
         robot = context.get("robot") or "leg"
         lesson = self.t.lesson(lesson_id, robot=robot, user_id=uid)
-        # Always attach the newest run for this lesson so Hermes can repair without asking.
+        # Always attach the newest run for this lesson so Hermes can repair/analyze without asking.
         if not context.get("last_run"):
             try:
                 recent = self.t.runs(uid=uid, lesson_id=lesson_id, limit=1)
                 if recent:
-                    full = self.t.run(recent[0]["id"], log_lines=60)
-                    tail = full.get("log_tail") or []
-                    context["last_run"] = {
-                        "id": full["id"],
-                        "state": full.get("state"),
-                        "error": full.get("error"),
-                        "log_tail": "\n".join(tail) if isinstance(tail, list) else str(tail),
-                        "runtime": (full.get("runtime") or {}).get("label"),
-                    }
+                    context["last_run"] = self._last_run_context(recent[0]["id"])
+            except Exception:
+                pass
+        elif context.get("last_run", {}).get("id") and not context["last_run"].get("files"):
+            try:
+                context["last_run"] = self._last_run_context(context["last_run"]["id"])
             except Exception:
                 pass
         self.t.append_message(uid, lesson_id, "user", message)
         self.t.touch_last(uid, lesson_id, robot)
-        # Slash commands + repair intents must run real tools. The 8B Hermes GGUF often
-        # ignores <tool_call> and just asks for more info — never let that block fixes.
+        # Slash commands + repair/analyze intents must run real tools. The 8B Hermes GGUF often
+        # ignores <tool_call> and just asks for more info — never let that block fixes or result review.
         cmd = message.split(None, 1)[0] if message else ""
-        force_tools = cmd.startswith("/") or bool(REPAIR_HINT.search(message))
+        wants_analyze = bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message))
+        force_tools = cmd.startswith("/") or bool(REPAIR_HINT.search(message)) or wants_analyze
         if force_tools:
-            yield from OfflineTutor(self).respond(
-                uid, lesson, context, message,
-                note="以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。",
+            note = (
+                "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。"
+                if wants_analyze or cmd in ("/analyze", "/result")
+                else "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。"
             )
+            yield from OfflineTutor(self).respond(uid, lesson, context, message, note=note)
             return
         if self.llm is not None and self.llm.chat_ready():
             yield from self._hermes(uid, lesson, context, message)
@@ -294,6 +319,8 @@ class Agent:
                 return {"path": f"tutorials/lessons/{lesson['id']}/example.py", "code": code}, events
             if name == "read_run_log":
                 return self._read_run_log(uid, lesson["id"], arguments.get("run_id") or (context.get("last_run") or {}).get("id")), events
+            if name == "analyze_run":
+                return self._analyze_run(uid, lesson["id"], arguments.get("run_id") or (context.get("last_run") or {}).get("id")), events
             if name == "diagnose_runtime":
                 return self._diagnose_runtime(context), events
             if name == "repair_isaaclab_cuda":
@@ -343,18 +370,42 @@ class Agent:
         except APIError as exc:
             return {"error": str(exc)}, events
 
-    def _read_run_log(self, uid, lesson_id, run_id=None):
+    def _resolve_run(self, uid, lesson_id, run_id=None, log_lines=80):
         run = None
         if run_id:
             try:
-                run = self.t.run(run_id, log_lines=80)
+                run = self.t.run(run_id, log_lines=log_lines)
             except APIError:
                 run = None
         if run is None:
             runs = self.t.runs(uid=uid, lesson_id=lesson_id, limit=1)
             if not runs:
-                return {"ok": False, "error": "此課程尚無執行紀錄"}
-            run = self.t.run(runs[0]["id"], log_lines=80)
+                return None
+            run = self.t.run(runs[0]["id"], log_lines=log_lines)
+        return run
+
+    def _last_run_context(self, run_id):
+        full = self.t.run(run_id, log_lines=60)
+        tail = full.get("log_tail") or []
+        files = full.get("files") or []
+        return {
+            "id": full["id"],
+            "state": full.get("state"),
+            "error": full.get("error"),
+            "log_tail": "\n".join(tail) if isinstance(tail, list) else str(tail),
+            "runtime": (full.get("runtime") or {}).get("label"),
+            "files": files,
+            "result": full.get("result"),
+            "evaluation": full.get("evaluation"),
+            "media_url": full.get("media_url"),
+            "has_video": "result.mp4" in files,
+            "has_rollout": "rollout.json" in files,
+        }
+
+    def _read_run_log(self, uid, lesson_id, run_id=None):
+        run = self._resolve_run(uid, lesson_id, run_id, log_lines=80)
+        if run is None:
+            return {"ok": False, "error": "此課程尚無執行紀錄"}
         log_tail = run.get("log_tail") or []
         if isinstance(log_tail, list):
             log_text = "\n".join(log_tail)
@@ -367,6 +418,54 @@ class Agent:
             "error": run.get("error"),
             "runtime": (run.get("runtime") or {}).get("label"),
             "log_tail": log_text[-6000:],
+        }
+
+    def _analyze_run(self, uid, lesson_id, run_id=None):
+        run = self._resolve_run(uid, lesson_id, run_id, log_lines=40)
+        if run is None:
+            return {"ok": False, "error": "此課程尚無執行紀錄，請先按「執行」。"}
+        directory = self.t.run_dir(run["id"])
+        files = run.get("files") or []
+        result = run.get("result")
+        evaluation = run.get("evaluation")
+        progress = run.get("progress")
+        media_url = run.get("media_url") or f"/media/tutorial/{run['id']}/"
+        summary_bits = []
+        if result is None:
+            summary_bits.append("尚無 result.json（執行可能未完成或寫入失敗）。")
+        else:
+            err = result.get("error")
+            if err:
+                summary_bits.append(f"result.json 標記失敗：{err}")
+            else:
+                keys = [k for k in ("phase", "message", "physics", "num_envs", "steps", "survived", "reward", "mean_reward", "passed") if k in result]
+                summary_bits.append("result.json 欄位：" + (", ".join(f"{k}={result.get(k)!r}" for k in keys) or "（有內容，見 result）"))
+        if evaluation:
+            passed = evaluation.get("passed")
+            summary_bits.append(f"evaluation.json passed={passed!r}")
+        if "result.mp4" in files:
+            summary_bits.append(f"推論影片可在 Lab 面板播放：{media_url}result.mp4")
+        elif "rollout.json" in files:
+            summary_bits.append(f"無 mp4；可用 Lab 面板 Three.js 重播 rollout：{media_url}rollout.json")
+        else:
+            summary_bits.append("尚無 result.mp4／rollout.json（記錄階段可能未跑或 viz 未啟用）。")
+        return {
+            "ok": True,
+            "run_id": run["id"],
+            "state": run.get("state"),
+            "error": run.get("error"),
+            "runtime": (run.get("runtime") or {}).get("label"),
+            "lesson_id": run.get("lesson_id") or lesson_id,
+            "robot": run.get("robot"),
+            "files": files,
+            "media_url": media_url,
+            "video_url": f"{media_url}result.mp4" if "result.mp4" in files else None,
+            "rollout_url": f"{media_url}rollout.json" if "rollout.json" in files else None,
+            "result": result,
+            "evaluation": evaluation,
+            "progress": progress,
+            "summary": " ".join(summary_bits),
+            "path": str(directory),
         }
 
     def _diagnose_runtime(self, context=None):
@@ -546,7 +645,7 @@ class OfflineTutor:
     """Deterministic fallback when no LLM is running: answers from lesson.md, supports slash commands."""
 
     COMMANDS = ("/search", "/arxiv", "/youtube", "/fetch", "/run", "/params", "/code", "/remember",
-                "/fix", "/diagnose", "/log", "/help")
+                "/fix", "/diagnose", "/log", "/analyze", "/result", "/help")
 
     def __init__(self, agent):
         self.agent = agent
@@ -572,6 +671,10 @@ class OfflineTutor:
         cmd, _, rest = lowered.partition(" ")
         last_err = f"{(context.get('last_run') or {}).get('error') or ''} {(context.get('last_run') or {}).get('log_tail') or ''}"
         wants_fix = bool(REPAIR_HINT.search(message)) or bool((context.get("last_run") or {}).get("error"))
+        wants_analyze = (
+            cmd in ("/analyze", "/result")
+            or (bool(ANALYZE_HINT.search(message)) and not bool(REPAIR_HINT.search(message)))
+        )
         physx_in_msg = bool(PHYSX_HINT.search(message)) or bool(PHYSX_HINT.search(last_err))
         # /code PhysxJointAPI must not become「example.py 裡沒有這個字串」— route to repair.
         if cmd == "/code" and (physx_in_msg or PHYSX_HINT.search(rest) or wants_fix and PHYSX_HINT.search(rest + last_err)):
@@ -579,6 +682,14 @@ class OfflineTutor:
                 uid, lesson, context, answer_parts, reasoning,
                 do_repair=True, message=message,
             )
+            text = "\n\n".join(answer_parts)
+            for chunk in re.findall(r".{1,120}(?:\s|$)", text, re.S) or [text]:
+                yield {"type": "token", "text": chunk}
+            saved = self.t.append_message(uid, lesson["id"], "assistant", text, reasoning="\n".join(reasoning), mode="offline")
+            yield {"type": "done", "message_id": saved["id"], "mode": "offline"}
+            return
+        if wants_analyze:
+            yield from self._analyze_flow(uid, lesson, context, answer_parts, reasoning)
             text = "\n\n".join(answer_parts)
             for chunk in re.findall(r".{1,120}(?:\s|$)", text, re.S) or [text]:
                 yield {"type": "token", "text": chunk}
@@ -677,6 +788,35 @@ class OfflineTutor:
             yield {"type": "token", "text": chunk}
         saved = self.t.append_message(uid, lesson["id"], "assistant", text, reasoning="\n".join(reasoning), mode="offline")
         yield {"type": "done", "message_id": saved["id"], "mode": "offline"}
+
+    def _analyze_flow(self, uid, lesson, context, answer_parts, reasoning):
+        reasoning.append("呼叫 analyze_run 解讀最近執行的 result／evaluation／媒體")
+        yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+        yield {"type": "tool_call", "name": "analyze_run", "arguments": {}}
+        info, _ = self.agent.run_tool(uid, lesson, context, "analyze_run", {})
+        yield {"type": "tool_result", "name": "analyze_run", "result": self.agent.summarize(info)}
+        if not info.get("ok"):
+            answer_parts.append(info.get("error") or "沒有可分析的執行紀錄。")
+            return
+        result = info.get("result") or {}
+        evaluation = info.get("evaluation") or {}
+        lines = [
+            f"**執行分析** `{info['run_id'][:8]}` · {info.get('state')} · {info.get('runtime') or ''}",
+            info.get("summary") or "",
+        ]
+        if result:
+            pretty = json.dumps(result, ensure_ascii=False, indent=2)
+            lines.append(f"**result.json**\n```json\n{pretty[:2500]}\n```")
+        if evaluation:
+            pretty = json.dumps(evaluation, ensure_ascii=False, indent=2)
+            lines.append(f"**evaluation.json**\n```json\n{pretty[:1800]}\n```")
+        if info.get("video_url"):
+            lines.append(f"推論影片：Lab 面板可直接播放，或開啟 `{info['video_url']}`。")
+        elif info.get("rollout_url"):
+            lines.append(f"無 mp4；Lab 面板可用 Three.js 重播 rollout：`{info['rollout_url']}`。")
+        if info.get("error"):
+            lines.append(f"執行錯誤：{info['error']}（若要修環境請用 `/fix`）。")
+        answer_parts.append("\n\n".join(p for p in lines if p))
 
     def _repair_flow(self, uid, lesson, context, answer_parts, reasoning, do_repair=False, message=""):
         reasoning.append("讀取最近執行紀錄並診斷 runtime")
@@ -793,7 +933,10 @@ class OfflineTutor:
     @staticmethod
     def help_text(lesson, short=False):
         params = ", ".join(f"`{p['key']}`" for p in lesson.get("params", [])[:8])
-        lines = ["可用指令：`/search`、`/arxiv`、`/youtube`、`/fetch`、`/params`、`/run`、`/code`、`/log`、`/diagnose`、`/fix`、`/propose`、`/remember`、`/help`。"]
+        lines = ["可用指令：`/search`、`/arxiv`、`/youtube`、`/fetch`、`/params`、`/run`、`/code`、`/log`、`/analyze`、`/diagnose`、`/fix`、`/propose`、`/remember`、`/help`。"]
         if not short:
-            lines.append(f"這堂課的參數：{params or '（無）'}。執行失敗時直接說「請修復」或打 `/fix`。")
+            lines.append(
+                f"這堂課的參數：{params or '（無）'}。執行失敗時直接說「請修復」或打 `/fix`；"
+                "跑完想看結果／影片／rollout 請說「分析結果」或打 `/analyze`。"
+            )
         return "\n".join(lines)
