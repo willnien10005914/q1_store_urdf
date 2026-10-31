@@ -51,12 +51,34 @@ const NOTE_MANUAL = /^#\s*\[手動|#\s*\[Manual/i;
 function labEl() {
   return document.querySelector('.tut-lab');
 }
+function pageEl() {
+  return document.querySelector('.tut-page');
+}
+function layoutEl() {
+  return document.querySelector('.tut-layout');
+}
 
 function setCodeExpanded(on) {
+  const editing = !!on || state.codeWide;
   const lab = labEl();
-  if (!lab) return;
-  lab.classList.toggle('is-editing', !!on || state.codeWide);
-  if (state.codeWide) lab.classList.add('is-wide');
+  const page = pageEl();
+  const layout = layoutEl();
+  lab?.classList.toggle('is-editing', editing);
+  lab?.classList.toggle('is-wide', state.codeWide);
+  // Page chrome must yield space — lab-internal fr tweaks alone cannot beat the 3-column shell.
+  page?.classList.toggle('is-code-editing', editing && !state.codeWide);
+  page?.classList.toggle('is-code-focus', state.codeWide);
+  layout?.classList.toggle('is-code-editing', editing && !state.codeWide);
+  layout?.classList.toggle('is-code-focus', state.codeWide);
+  document.body.classList.toggle('tut-code-focus', state.codeWide);
+  if (!state.codeWide && lab) lab.style.removeProperty('grid-template-columns');
+  const btn = $('code-widen');
+  if (btn) {
+    btn.textContent = state.codeWide
+      ? (getLocale() === 'en' ? 'Exit focus' : '離開專注')
+      : (getLocale() === 'en' ? 'Widen' : '加寬');
+  }
+  requestAnimationFrame(() => syncCodeChrome());
 }
 
 function lineDiffIndexes(before, after) {
@@ -212,31 +234,33 @@ function wireCodeEditor() {
   });
   $('code-widen')?.addEventListener('click', () => {
     state.codeWide = !state.codeWide;
-    const lab = labEl();
-    lab?.classList.toggle('is-wide', state.codeWide);
-    lab?.classList.toggle('is-editing', true);
-    $('code-widen').textContent = state.codeWide
-      ? (getLocale() === 'en' ? 'Narrow' : '縮回')
-      : (getLocale() === 'en' ? 'Widen' : '加寬');
+    setCodeExpanded(true);
+    if (state.codeWide) {
+      document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
+      document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
+      $('code')?.focus({preventScroll: true});
+    }
   });
   const handle = $('code-resize');
   if (handle) {
     let dragging = false;
     handle.addEventListener('pointerdown', (e) => {
       dragging = true;
-      labEl()?.classList.add('is-resizing', 'is-editing');
+      state.codeWide = true;
+      setCodeExpanded(true);
+      labEl()?.classList.add('is-resizing');
       handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
     });
     handle.addEventListener('pointermove', (e) => {
       if (!dragging) return;
       const lab = labEl();
       if (!lab) return;
       const rect = lab.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const ratio = Math.min(0.82, Math.max(0.42, x / rect.width));
-      lab.style.setProperty('--tut-code-fr', `${(ratio / (1 - ratio)).toFixed(3)}fr`);
-      state.codeWide = true;
-      lab.classList.add('is-wide');
+      const x = Math.min(rect.width - 180, Math.max(rect.width * 0.45, e.clientX - rect.left));
+      const codePx = Math.round(x);
+      const sidePx = Math.round(rect.width - x);
+      lab.style.gridTemplateColumns = `minmax(0,${codePx}px) minmax(180px,${sidePx}px)`;
     });
     const stop = () => { dragging = false; labEl()?.classList.remove('is-resizing'); };
     handle.addEventListener('pointerup', stop);
@@ -439,11 +463,9 @@ async function openLesson(id) {
   $('lesson-runtime').textContent = lesson.runtime?.label || '';
   $('lesson-minutes').textContent = (lesson.minutes || '?') + ' min';
   $('lesson-md').innerHTML = renderMarkdown(lesson.markdown || '');
+  state.codeWide = false;
   setCode(lesson.draft_code || lesson.code || '', {baseline: true});
   setCodeExpanded(false);
-  state.codeWide = false;
-  labEl()?.classList.remove('is-wide');
-  if ($('code-widen')) $('code-widen').textContent = getLocale() === 'en' ? 'Widen' : '加寬';
   renderParams(lesson);
   renderQuiz(lesson);
   renderRefs(lesson);

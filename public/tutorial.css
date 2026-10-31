@@ -34,7 +34,9 @@
 .resume-card .actions{display:flex;gap:10px;align-items:center;margin-top:4px}
 .resume-card .dismiss{margin-left:auto;font-size:18px;color:#aaa;line-height:1}
 
-.tut-page{max-width:1440px;margin:0 auto;padding:18px 24px 60px}
+.tut-page{max-width:1440px;margin:0 auto;padding:18px 24px 60px;transition:max-width .25s ease,padding .25s ease}
+.tut-page.is-code-editing{max-width:min(1760px,calc(100vw - 16px))}
+.tut-page.is-code-focus{max-width:none;width:100%;padding-left:10px;padding-right:10px}
 .tut-top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:18px;flex-wrap:wrap}
 .tut-top h1{font-size:clamp(24px,2.4vw,34px);letter-spacing:-1px;margin:0 0 6px;font-weight:700}
 .tut-top p{margin:0;color:var(--muted);font-size:12px;line-height:1.7;max-width:640px}
@@ -44,8 +46,13 @@
 .tut-progress-bar{height:6px;background:#eeeef3;border-radius:999px;overflow:hidden;width:120px}
 .tut-progress-bar>i{display:block;height:100%;background:var(--blue);width:0;transition:width .4s}
 
-.tut-layout{display:grid;grid-template-columns:240px minmax(0,1fr) 340px;gap:16px;align-items:start}
-.tut-side,.tut-main,.tut-agent{background:#fff;border:1px solid var(--line);border-radius:16px;min-height:70vh}
+.tut-layout{display:grid;grid-template-columns:240px minmax(0,1fr) 340px;gap:16px;align-items:start;transition:grid-template-columns .25s ease,gap .25s ease}
+.tut-layout.is-code-editing{grid-template-columns:168px minmax(0,1fr) 260px}
+.tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr);gap:0}
+.tut-layout.is-code-focus .tut-side,
+.tut-layout.is-code-focus .tut-agent{display:none}
+.tut-side,.tut-main,.tut-agent{background:#fff;border:1px solid var(--line);border-radius:16px;min-height:70vh;min-width:0}
+.tut-layout.is-code-focus .tut-main{min-height:calc(100vh - 120px);border-radius:12px}
 .tut-side{padding:14px;position:sticky;top:86px;max-height:calc(100vh - 100px);overflow:auto}
 .tut-side h2{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#8a8a92;margin:12px 0 8px}
 .tut-side h2:first-child{margin-top:0}
@@ -77,10 +84,10 @@
 .tut-md table.md-table th{background:#fafbfc;font-size:10px;letter-spacing:.4px;text-transform:uppercase;color:#8a8a92}
 .tut-md blockquote{margin:0 0 1em;padding:10px 14px;border-left:3px solid #cfe0f7;background:#f7faff;color:#526988;font-size:12px}
 
-.tut-lab{display:grid;grid-template-columns:minmax(0,var(--tut-code-fr,1.35fr)) minmax(220px,.75fr);gap:14px;align-items:stretch;transition:grid-template-columns .25s ease}
-.tut-lab.is-editing{--tut-code-fr:2.15fr}
-.tut-lab.is-wide{--tut-code-fr:2.6fr}
-.tut-code-wrap{display:flex;flex-direction:column;gap:8px;min-width:0;position:relative}
+.tut-lab{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(220px,.85fr);gap:14px;align-items:stretch;transition:grid-template-columns .2s ease}
+.tut-lab.is-editing{grid-template-columns:minmax(0,1.85fr) minmax(200px,.7fr)}
+.tut-lab.is-wide{grid-template-columns:minmax(0,1fr) minmax(200px,280px)}
+.tut-code-wrap{display:flex;flex-direction:column;gap:8px;min-width:0;position:relative;width:100%}
 .tut-code-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .tut-code-toolbar strong{font-size:12px}
 .tut-code-legend{display:inline-flex;align-items:center;gap:8px;font-size:10px;color:#657b83;margin-right:auto}
