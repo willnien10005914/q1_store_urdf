@@ -90,9 +90,17 @@ MediaPipe Pose 是人體姿態模型；H2-X 實測曾偵測到背景人物，候
 ```bash
 git clone git@github.com:willnien10005914/q1_store_urdf.git
 cd q1_store_urdf
-bash scripts/start_store.sh --port 8876
+
+# 建議：啟動前先跑 idempotent setup（Hermes + Isaac Lab 3；已安裝會跳過）
+bash scripts/setup_store.sh
+# 檢查狀態：bash scripts/setup_store.sh --check
+
+bash scripts/start_store.sh --port 8876 --with-hermes
 # 或：python3 server.py --port 8876
 ```
+
+`setup_store.sh` 會寫入 `.data/store.env`（含 `Q1_ISAACLAB3_ROOT`、`Q1_LLM_*`）；
+`start_store.sh` 啟動時自動 source。也可用 `bash scripts/start_store.sh --setup --with-hermes`。
 
 開啟 **http://127.0.0.1:8876/**；同網段也可開 `http://<這台 Spark 的區網 IP>:8876/`。
 服務預設綁 `0.0.0.0`（區網可連）；若只要本機可改 `--host 127.0.0.1`。
@@ -104,9 +112,10 @@ bash scripts/start_store.sh --port 8876
 最大變格（多後端物理、ProxyArray／XYZW、URDF importer、致動器、Manager-based PPO、
 visualizers、ONNX 部署），可改 `example.py`、調參數、考測驗，並用本機 Hermes／離線助教對話。
 
-- 需要真實 Isaac Lab 3 執行時：`export Q1_ISAACLAB3_ROOT=~/IsaacLab3`（v3.0.0 checkout + `uv sync`）。
-  未設定時，需 Lab 的課程會標 `blocked` 並寫明原因；遷移掃描／ONNX 匯出／錄影 fallback 仍可跑。
-- 本機 LLM：在 Tutorial 頁下載 Hermes GGUF 後啟動；或設 `Q1_LLM_BASE_URL`。
+- Isaac Lab 3 / Hermes：由 `scripts/setup_store.sh` 預備（clone `~/IsaacLab3` @ v3.0.0、`uv sync`、
+  CUDA llama-cpp + GGUF）。已存在的 venv／模型／checkout 不會重裝。
+- 未跑 setup 時，需 Lab 的課程會標 `blocked` 並提示跑 `setup_store.sh`；遷移掃描／ONNX／錄影 fallback 仍可跑。
+- 也可手動 `export Q1_ISAACLAB3_ROOT=~/IsaacLab3` 或設 `Q1_LLM_BASE_URL`。
 - Hermes 可搜尋進修素材 → 待審 md → 人工同意 → Cursor 依 prompt 建課。
 
 設計細節：[docs/ISAACLAB3_TUTORIAL.md](docs/ISAACLAB3_TUTORIAL.md)。

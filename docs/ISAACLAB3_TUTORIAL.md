@@ -93,30 +93,37 @@ python3 -m q1store.tutorial mark-created <proposal_id> <lesson_id>
 | `Q1_TUTORIAL_PYTHON` | 沙箱 python（預設 `sys.executable`） |
 | `Q1_LLM_BASE_URL` / `Q1_LLM_MODEL` | 外部 OpenAI-compatible endpoint（跳過本機下載） |
 | `Q1_LLM_PORT` | 本機 LLM 埠（預設 8877） |
-| `Q1_LLAMA_SERVER` | `llama-server` 路徑 |
+| `Q1_LLAMA_SERVER` | `llama-server` / `scripts/hermes_server.sh` 路徑 |
 | `Q1_STORE_DATA` | 覆寫 `.data` |
+| `Q1_STORE_ENV_FILE` | 覆寫 `.data/store.env`（setup 產出、start 會 source） |
 
-沒有 Lab 3 時，需要 GPU 的課程會標 `blocked` 並寫明原因；**不會假裝訓練成功**。l07 仍可用 kinematic fallback 練習 rollout 契約。
+沒有 Lab 3 時，需要 GPU 的課程會標 `blocked` 並提示跑 `setup_store.sh`；**不會假裝訓練成功**。l07 仍可用 kinematic fallback 練習 rollout 契約。
+
+## 建議啟動流程（setup → store）
+
+啟動 web 前先跑 idempotent setup，把 Hermes 與 Isaac Lab 3 一次備齊（已安裝會 skip）：
+
+```bash
+bash scripts/setup_store.sh              # 寫入 .data/store.env
+bash scripts/setup_store.sh --check      # 只報告，缺件 exit 1
+bash scripts/start_store.sh --port 8878 --with-hermes
+# 等價：bash scripts/start_store.sh --setup --port 8878 --with-hermes
+```
+
+`setup_store.sh` 會：
+
+1. **Hermes**：`.venv-llm` + CUDA `llama-cpp-python[server]` + cudart + Hermes-3 GGUF（已有則跳過）
+2. **Isaac Lab 3**：clone `isaac-sim/IsaacLab` @ `v3.0.0` → `~/IsaacLab3`（可用 `Q1_ISAACLAB3_ROOT` 覆寫；**不要**覆寫既有 `~/IsaacLab` 2.x），再 `uv sync`（可加 `--with-isaacsim`）
+3. 寫 `.data/store.env`；`start_store.sh` 自動 source，並可 `--with-hermes` 拉起 `:8877`
 
 ## 本機 LLM（Hermes）
 
-建議路徑（16 GB 筆電 GPU，Ubuntu 22.04）：
+手動路徑（通常不必；prefer `setup_store.sh`）：
 
 ```bash
-# 一次性：venv + CUDA wheel + server 依賴
-python3.11 -m venv .venv-llm
-.venv-llm/bin/pip install 'llama-cpp-python[server]' \
-  --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-# 下載 cudart（若系統沒有 libcudart.so.12）到 .data/llama-cpp/cudart/…
-# 下載 GGUF 到 .data/models/NousResearch--Hermes-3-Llama-3.1-8B-GGUF/
-
-# 啟動 Hermes（GPU）
+bash scripts/setup_store.sh --hermes-only
 bash scripts/hermes_server.sh          # http://127.0.0.1:8877/v1
-
-# 啟動 store 並接上 Hermes
-Q1_LLM_BASE_URL=http://127.0.0.1:8877/v1 \
-Q1_LLM_MODEL="$(curl -s http://127.0.0.1:8877/v1/models | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"][0]["id"])')" \
-bash scripts/start_store.sh --port 8878
+bash scripts/start_store.sh --port 8878 --with-hermes
 ```
 
 Tutorial 頁右上角應顯示 **Hermes**；reasoning 視窗會出現 `<think>`。

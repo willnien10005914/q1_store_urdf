@@ -9,11 +9,11 @@ CUDART="${Q1_CUDART_DIR:-$ROOT/.data/llama-cpp/cudart/cudart-llama-b12018-bin-ub
 NV_ROOT="${Q1_NVIDIA_LIBS:-$HOME/.venv/myisaacsim/lib/python3.11/site-packages/nvidia}"
 
 if [[ ! -x "$VENV/bin/python" ]]; then
-  echo "missing $VENV — create with: python3.11 -m venv .venv-llm && .venv-llm/bin/pip install 'llama-cpp-python[server]'" >&2
+  echo "missing $VENV — run: bash scripts/setup_store.sh --hermes-only" >&2
   exit 1
 fi
 if [[ ! -f "$MODEL" ]]; then
-  echo "missing model $MODEL" >&2
+  echo "missing model $MODEL — run: bash scripts/setup_store.sh --hermes-only" >&2
   exit 1
 fi
 
