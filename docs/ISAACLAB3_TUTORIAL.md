@@ -114,7 +114,10 @@ bash scripts/start_store.sh --port 8878 --with-hermes
 
 1. **Hermes**：`.venv-llm` + CUDA `llama-cpp-python[server]` + cudart + Hermes-3 GGUF（已有則跳過）
 2. **Isaac Lab 3**：clone `isaac-sim/IsaacLab` @ `v3.0.0` → `~/IsaacLab3`（可用 `Q1_ISAACLAB3_ROOT` 覆寫；**不要**覆寫既有 `~/IsaacLab` 2.x），再 `uv sync`（可加 `--with-isaacsim`）
-3. 寫 `.data/store.env`；`start_store.sh` 自動 source，並可 `--with-hermes` 拉起 `:8877`
+3. **torch／driver 對齊**：Lab 3 預設 `torch+cu130`；若本機 `nvidia-smi` 只到 CUDA 12.8，會跑 `scripts/repair_isaaclab_cuda.sh` 改釘 `cu128`
+4. 寫 `.data/store.env`；`start_store.sh` 自動 source，並可 `--with-hermes` 拉起 `:8877`
+
+課程執行失敗時，右側 Hermes（或離線 `/fix`）會讀 `run.log`、呼叫 `diagnose_runtime`，必要時執行 `repair_isaaclab_cuda`。前端會把最近一次 run 的 error／log 一併傳入 chat context。
 
 ## 本機 LLM（Hermes）
 
