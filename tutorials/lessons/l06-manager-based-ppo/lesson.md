@@ -2,6 +2,26 @@
 
 前五課都在「把 Q1 放進 3.0」；從這課開始**訓練**。Isaac Lab 的 manager-based 工作流程把一個 RL 任務拆成可獨立替換的 term：observation、action、reward、termination、event（randomization）、command、curriculum。好處是：調 reward 只改 cfg，不改環境類別——也就是本頁右側滑桿在做的事。
 
+## 0. Newton MJWarp 容量（必讀）
+
+Q1 碰撞幾何多；預設 `MJWarpSolverCfg(njmax=300)` 一倒下就會 `nefc overflow`，接著 observation 出現 NaN、PPO `check_nan` 炸掉。本課跟 Lab 的 locomotion velocity preset 對齊：
+
+```python
+from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg, NewtonCollisionPipelineCfg, NewtonShapeCfg
+
+sim_cfg.physics = NewtonCfg(
+    solver_cfg=MJWarpSolverCfg(
+        njmax=1000, nconmax=300, iterations=100,
+        integrator="implicitfast", use_mujoco_contacts=False,
+    ),
+    collision_cfg=NewtonCollisionPipelineCfg(max_triangle_pairs=2_500_000),
+    num_substeps=2,
+    default_shape_cfg=NewtonShapeCfg(margin=0.0, ke=160000.0, kd=1100.0),
+)
+```
+
+若 log 仍出現 `increase njmax to N`，把 `njmax` 再加大（例如 1500）。
+
 ## 1. 任務骨架
 
 ```python

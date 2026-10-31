@@ -46,8 +46,29 @@ if P.get("physics", "newton_mjwarp") == "isaacsim_physx":
     from isaaclab_physx.physics import PhysxCfg
     sim_cfg.physics = PhysxCfg()
 else:
-    from isaaclab_newton.physics import NewtonCfg
-    sim_cfg.physics = NewtonCfg()
+    # Match Lab locomotion velocity presets: Q1 has many contacts; default njmax=300 overflows
+    # ("nefc overflow") and the solver then emits NaN observations into PPO.
+    from isaaclab_newton.physics import (
+        MJWarpSolverCfg,
+        NewtonCfg,
+        NewtonCollisionPipelineCfg,
+        NewtonShapeCfg,
+    )
+    sim_cfg.physics = NewtonCfg(
+        solver_cfg=MJWarpSolverCfg(
+            njmax=int(P.get("njmax", 1000)),
+            nconmax=int(P.get("nconmax", 300)),
+            iterations=int(P.get("solver_iterations", 100)),
+            ls_iterations=50,
+            cone="pyramidal",
+            impratio=1.0,
+            integrator="implicitfast",
+            use_mujoco_contacts=False,
+        ),
+        collision_cfg=NewtonCollisionPipelineCfg(max_triangle_pairs=2_500_000),
+        num_substeps=int(P.get("num_substeps", 2)),
+        default_shape_cfg=NewtonShapeCfg(margin=0.0, ke=160000.0, kd=1100.0),
+    )
 if args.phase == "record":
     from isaaclab.visualizers import VisualizerCfg
     os.environ.setdefault("HEADLESS", "1")
@@ -220,7 +241,8 @@ with launch_simulation(sim_cfg):
         # --- evaluation: deterministic policy, survival / upright / height over fixed episodes
         write_json(PROGRESS, {"phase": "evaluating", "iteration": iteration, "max_iterations": runner_cfg.max_iterations, "elapsed_s": round(elapsed_before + time.monotonic() - T0, 1), "updated_at": time.time()})
         policy = runner.get_inference_policy(device=env.device)
-        obs, _ = wrapped.get_observations() if hasattr(wrapped, "get_observations") else (wrapped.reset()[0], None)
+        # RslRlVecEnvWrapper.get_observations() returns a TensorDict (not a (obs, info) tuple).
+        obs = wrapped.get_observations() if hasattr(wrapped, "get_observations") else wrapped.reset()[0]
         survived = torch.ones(env.num_envs, dtype=torch.bool, device=env.device)
         upright, heights, n = 0.0, 0.0, 0
         robot = env.scene["robot"]

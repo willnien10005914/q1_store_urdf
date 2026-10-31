@@ -105,6 +105,9 @@ EXAMPLE_API_HINT = re.compile(
     r"NewtonCfg\.__init__|PhysxCfg\.__init__|VisualizerCfg\.__init__|has no attribute|"
     r"get_masses|body_mass|class_name|RslRlPpoActorCriticCfg|stochastic|"
     r"VisualizerCfg\(kind=|VideoRecorderCfg.*\.create\(|source=['\"]viz:"
+    r"|nefc overflow|increase njmax|solver iterations limit reached|"
+    r"observation group 'policy'.*NaN|contains NaN values|"
+    r"|too many values to unpack \(expected 2\)|"
     r"|File \"example\.py\"|"
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
@@ -1362,6 +1365,56 @@ def fix_known_example_api_errors(
             if text2 != text:
                 text = text2
                 notes.append("PhysxCfg() 硬編碼 → physics preset（預設 newton_mjwarp）")
+
+    # MJWarp nefc overflow / solver iteration limit → NaN obs in PPO. Ship locomotion-capacity NewtonCfg.
+    # Also: obs, _ = wrapped.get_observations() unpacks TensorDict keys (ValueError expected 2).
+    nan_phys = (
+        re.search(
+            r"nefc overflow|increase njmax|solver iterations limit reached|contains NaN values|"
+            r"too many values to unpack \(expected 2\)",
+            err,
+            re.I,
+        )
+        is not None
+    )
+    if nan_phys and (
+        lid.startswith("l06")
+        or "OnPolicyRunner" in text
+        or "ManagerBasedRLEnv" in text
+        or "NewtonCfg()" in text
+    ):
+        if canon and "njmax" in canon and "MJWarpSolverCfg" in canon and canon_newer():
+            notes.append(
+                "nefc overflow／NaN obs → MJWarpSolverCfg(njmax≥1000, integrator=implicitfast)（locomotion preset）"
+            )
+            return _ship_canonical(canon, lid, notes)
+        if re.search(r"NewtonCfg\s*\(\s*\)", text) and "njmax" not in text:
+            text2 = text
+            if "MJWarpSolverCfg" not in text2:
+                text2 = re.sub(
+                    r"from isaaclab_newton\.physics import NewtonCfg\b",
+                    "from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg, "
+                    "NewtonCollisionPipelineCfg, NewtonShapeCfg",
+                    text2,
+                    count=1,
+                )
+            text2 = re.sub(
+                r"sim_cfg\.physics\s*=\s*NewtonCfg\s*\(\s*\)",
+                "sim_cfg.physics = NewtonCfg(\n"
+                "        solver_cfg=MJWarpSolverCfg(\n"
+                "            njmax=1000, nconmax=300, iterations=100,\n"
+                '            integrator="implicitfast", use_mujoco_contacts=False,\n'
+                "        ),\n"
+                "        collision_cfg=NewtonCollisionPipelineCfg(max_triangle_pairs=2_500_000),\n"
+                "        num_substeps=2,\n"
+                "        default_shape_cfg=NewtonShapeCfg(margin=0.0, ke=160000.0, kd=1100.0),\n"
+                "    )",
+                text2,
+                count=1,
+            )
+            if text2 != text:
+                text = text2
+                notes.append("NewtonCfg() → MJWarpSolverCfg(njmax=1000, …)（避免 nefc overflow／NaN）")
 
     # Deprecated RSL-RL policy=ActorCritic → actor/critic MLPModel (needs class_name).
     # Also: MLPModel(..., stochastic=...) when to_dict() skipped handle_deprecated_rsl_rl_cfg.

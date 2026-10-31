@@ -340,6 +340,30 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn("RslRlPpoActorCriticCfg", body)
         self.assertIn("MLPModel", note)
 
+    def test_fix_l06_nefc_nan_ships_canonical(self):
+        err = (
+            "solver iterations limit reached - please increase iterations to 100\n"
+            "nefc overflow - please increase njmax to 314\n"
+            'File "example.py", line 222, in <module>\n'
+            "    runner.learn(num_learning_iterations=chunk, init_at_random_ep_len=True)\n"
+            "ValueError: The observation group 'policy' returned by the environment contains NaN values.\n"
+        )
+        self.assertTrue(EXAMPLE_API_HINT.search(err))
+        broken = (
+            "from isaaclab_newton.physics import NewtonCfg\n"
+            "sim_cfg.physics = NewtonCfg()\n"
+            "runner = OnPolicyRunner(wrapped, runner_cfg.to_dict(), log_dir=str(JOB), device=env.device)\n"
+        )
+        canon = (ROOT / "tutorials/lessons/l06-manager-based-ppo/example.py").read_text()
+        fixed, note = fix_known_example_api_errors(
+            broken, err, "l06-manager-based-ppo", canonical_code=canon,
+        )
+        body = "\n".join(line for line in fixed.splitlines() if not line.startswith("# [Hermes]"))
+        self.assertIn("njmax", body)
+        self.assertIn("MJWarpSolverCfg", body)
+        self.assertIn("implicitfast", body)
+        self.assertRegex(note.lower(), r"nefc|njmax|nan")
+
     def test_fix_l06_stochastic_ships_canonical(self):
         err = (
             'File "example.py", line 186, in <module>\n'
