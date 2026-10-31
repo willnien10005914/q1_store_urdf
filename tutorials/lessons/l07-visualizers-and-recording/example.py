@@ -3,17 +3,20 @@
 
     uv run python example.py --job-dir <dir> --params <dir>/params.json
 
-Produces rollout.json (always) and result.mp4 (when viz=kit and record_video), plus progress.json with a
-`viz_url` field the store proxies to /viz/<run_id>/ so the viewer is reachable through Pinggy.
+Produces rollout.json (always) and result.mp4 (when viz=kit and a ManagerBased video recorder is
+available — this InteractiveScene demo relies on store-side ffmpeg from rollout for non-kit viz),
+plus progress.json with a `viz_url` field the store proxies to /viz/<run_id>/ so the viewer is
+reachable through Pinggy.
 
-If Isaac Lab 3 is not importable the script falls back to a kinematic rollout generator so the recording
-contract and the browser replay can be learned on any machine.
+If Isaac Lab 3 is not importable the script falls back to a kinematic rollout generator so the
+recording contract and the browser replay can be learned on any machine.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import os
 import time
 from pathlib import Path
 
@@ -103,25 +106,44 @@ if not HAVE_ISAACLAB3:
 
 from isaaclab.sim import SimulationCfg  # noqa: E402
 from isaaclab_newton.physics import NewtonCfg  # noqa: E402
-from isaaclab.visualizers import VisualizerCfg  # noqa: E402
 
 DT = 1.0 / FPS
 sim_cfg = SimulationCfg(dt=DT, device="cuda:0", physics=NewtonCfg())
 
-# --viz equivalent: a list of VisualizerCfg. "none" keeps the run fully headless (HEADLESS=1 semantics).
+# Concrete visualizer cfgs (isaaclab_visualizers.*). Base VisualizerCfg has no `kind=` kwarg —
+# pick ViserVisualizerCfg / RerunVisualizerCfg / NewtonGLVisualizerCfg / KitVisualizerCfg instead.
+# Attach them on sim_cfg.visualizer_cfgs (not the removed ViewerCfg / sim.visualizers).
 visualizers = []
 viz_url = None
-if VIZ == "viser":
-    visualizers.append(VisualizerCfg(kind="viser", port=PORT, eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6)))
+viz_note = None
+if VIZ == "none":
+    os.environ.setdefault("HEADLESS", "1")
+elif VIZ == "viser":
+    from isaaclab_visualizers.viser import ViserVisualizerCfg  # noqa: E402
+    visualizers.append(ViserVisualizerCfg(
+        port=PORT, eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6), open_browser=False,
+    ))
     viz_url = f"http://127.0.0.1:{PORT}/"
 elif VIZ == "rerun":
-    visualizers.append(VisualizerCfg(kind="rerun", port=PORT, eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6)))
+    from isaaclab_visualizers.rerun import RerunVisualizerCfg  # noqa: E402
+    visualizers.append(RerunVisualizerCfg(
+        web_port=PORT, eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6), open_browser=False,
+    ))
     viz_url = f"http://127.0.0.1:{PORT}/"
-elif VIZ in ("newton_gl", "kit"):
-    visualizers.append(VisualizerCfg(kind=VIZ, eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6)))
-sim_cfg.visualizers = visualizers
+elif VIZ == "newton_gl":
+    from isaaclab_visualizers.newton import NewtonGLVisualizerCfg  # noqa: E402
+    visualizers.append(NewtonGLVisualizerCfg(
+        eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6), headless=True,
+    ))
+elif VIZ == "kit":
+    from isaaclab_visualizers.kit import KitVisualizerCfg  # noqa: E402
+    visualizers.append(KitVisualizerCfg(eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6)))
+else:
+    viz_note = f"unknown viz={VIZ!r}; running headless"
+    os.environ.setdefault("HEADLESS", "1")
+sim_cfg.visualizer_cfgs = visualizers
 
-progress("starting", 0, FRAMES, message=f"launching viz={VIZ}", viz_url=viz_url)
+progress("starting", 0, FRAMES, message=f"launching viz={VIZ}", viz_url=viz_url, note=viz_note)
 
 with launch_simulation(sim_cfg):
     try:
@@ -160,10 +182,14 @@ with launch_simulation(sim_cfg):
                                               actuator_effort_limit=120.0, joint_effort_limit=120.0)},
         )
 
-    recorder = None
+    # VideoRecorderCfg lives on ManagerBasedRLEnvCfg.video_recorders (source="visualizer:kit",
+    # video_length=N) — there is no VideoRecorderCfg.create(). This InteractiveScene demo always
+    # writes rollout.json; kit/native mp4 needs an RL env, so non-kit / this path use store ffmpeg.
     if VIZ == "kit" and P.get("record_video", True):
-        from isaaclab.visualizers import VideoRecorderCfg
-        recorder = VideoRecorderCfg(source="viz:kit", fps=FPS, length=FRAMES, output_dir=str(JOB)).create()
+        print(
+            "[lesson07] VideoRecorderCfg(source='visualizer:kit', video_length=...) attaches to "
+            "ManagerBasedRLEnvCfg.video_recorders; InteractiveScene demo records via rollout.json."
+        )
 
     scene = InteractiveScene(RecSceneCfg(num_envs=1, env_spacing=2.0))
     sim.reset()
@@ -188,19 +214,14 @@ with launch_simulation(sim_cfg):
         q = robot.data.joint_pos.torch[0, idx].tolist()
         frames.append({"t": round(t, 4), "root_pos": [round(v, 4) for v in pos], "root_quat": [round(v, 5) for v in quat],
                        "q": [round(v, 5) for v in q]})
-        if recorder is not None:
-            recorder.capture()
         if k % FPS == 0:
             progress("running", k, FRAMES, message=f"t={t:.1f}s viz={VIZ}", viz_url=viz_url)
     write_rollout(frames)
-    video = False
-    if recorder is not None:
-        recorder.close()
-        mp4 = next(JOB.glob("*.mp4"), None)
-        if mp4 and mp4.name != "result.mp4":
-            mp4.rename(JOB / "result.mp4")
-        video = (JOB / "result.mp4").exists()
-    result = {"mode": "isaaclab3", "frames": FRAMES, "fps": FPS, "viz": VIZ, "viz_url": viz_url, "video": video, "motion": MOTION}
+    result = {
+        "mode": "isaaclab3", "frames": FRAMES, "fps": FPS, "viz": VIZ, "viz_url": viz_url,
+        "video": False, "motion": MOTION,
+        "video_note": "rollout.json → store ffmpeg for result.mp4; VideoRecorderCfg needs ManagerBasedRLEnv",
+    }
     (JOB / "result.json").write_text(json.dumps(result, indent=2))
     progress("complete", FRAMES, FRAMES, **result)
     print("[lesson07] " + json.dumps(result))

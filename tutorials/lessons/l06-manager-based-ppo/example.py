@@ -71,7 +71,14 @@ with launch_simulation(sim_cfg):
     from isaaclab.scene import InteractiveSceneCfg
     from isaaclab.utils import configclass
     from isaaclab.utils.noise import UniformNoiseCfg as Unoise
-    from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg, RslRlVecEnvWrapper
+    from isaaclab_rl.rsl_rl import (
+        RslRlMLPModelCfg,
+        RslRlOnPolicyRunnerCfg,
+        RslRlPpoAlgorithmCfg,
+        RslRlVecEnvWrapper,
+        handle_deprecated_rsl_rl_cfg,
+    )
+    from isaaclab_rl.rsl_rl.utils import check_rsl_rl_version
     from rsl_rl.runners import OnPolicyRunner
 
     VX = float(P.get("command_vx", 0.0))
@@ -181,7 +188,8 @@ with launch_simulation(sim_cfg):
         env_cfg.events.push = None if hasattr(env_cfg.events, "push") else None
     env = ManagerBasedRLEnv(cfg=env_cfg)
     wrapped = RslRlVecEnvWrapper(env, clip_actions=1.0)
-    runner_cfg = Q1RunnerCfg()
+    # rsl-rl 5.x: to_dict() still emits legacy stochastic/init_noise_std unless we migrate first.
+    runner_cfg = handle_deprecated_rsl_rl_cfg(Q1RunnerCfg(), check_rsl_rl_version())
     runner = OnPolicyRunner(wrapped, runner_cfg.to_dict(), log_dir=str(JOB), device=env.device)
 
     if args.phase == "train":

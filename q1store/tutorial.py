@@ -269,25 +269,41 @@ class Tutorial:
                 "control_joints": entry.get("control_joints", []), "default_joint_positions": entry.get("default_joint_positions", {}),
                 "spawn_height": entry.get("spawn_height", 0.85 if robot == "leg" else 0.65)}
 
+    def _python_with_torch(self):
+        """Prefer Isaac Lab's venv python when it exists so kind:any lessons (e.g. l08) get torch."""
+        root = self.isaaclab3_root
+        if root:
+            cand = root / ".venv" / "bin" / "python"
+            if cand.is_file():
+                return str(cand), f"Isaac Lab 3 venv @ {root}"
+        return self.python, "本機 python3（純 Python 範例）"
+
     def runtime_for(self, meta, params=None):
         kind = (meta.get("run") or {}).get("kind", "any")
         if kind == "any":
-            return {"mode": "python", "label": "本機 python3（純 Python 範例）", "command": [self.python]}
+            py, label = self._python_with_torch()
+            return {"mode": "python", "label": label, "command": [py]}
         root = self.isaaclab3_root
         if root and (root / "pyproject.toml").is_file() and self.uv:
             # Always pull the standalone URDF/MJCF importer; full Kit only when PhysX/Kit viz requested.
             command = [self.uv, "run", "--project", str(root), "--extra", "importers"]
             physics = (params or {}).get("physics")
-            if physics == "isaacsim_physx" or (params or {}).get("viz") in ("kit", "newton_rtx"):
+            viz = (params or {}).get("viz")
+            if physics == "isaacsim_physx" or viz in ("kit", "newton_rtx"):
                 command += ["--extra", "isaacsim"]
             elif physics == "ovphysx":
                 command += ["--extra", "ovphysx"]
+            if viz == "viser":
+                command += ["--extra", "viser"]
+            elif viz == "rerun":
+                command += ["--extra", "rerun"]
             return {"mode": "isaaclab3", "label": f"Isaac Lab 3 @ {root}", "command": command + ["python"], "root": str(root)}
         reason = ("Q1_ISAACLAB3_ROOT 未設定或不是 Isaac Lab 3 checkout（需要 pyproject.toml 與 uv）。"
                   "請先跑 bash scripts/setup_store.sh（會檢查／安裝 Hermes 與 clone IsaacLab v3.0.0 + uv sync，"
                   "已安裝的會跳過），再 bash scripts/start_store.sh --port 8878（預設會帶起 Hermes）。")
         if (meta.get("run") or {}).get("fallback"):
-            return {"mode": "python-fallback", "label": "無 Isaac Lab 3：執行範例的 fallback 分支", "command": [self.python], "reason": reason}
+            py, label = self._python_with_torch()
+            return {"mode": "python-fallback", "label": f"無 Isaac Lab 3：執行範例的 fallback 分支（{label}）", "command": [py], "reason": reason}
         return {"mode": "blocked", "label": "需要 Isaac Lab 3", "command": None, "reason": reason}
 
     def catalog(self, robot=None, user_id=None):

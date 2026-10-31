@@ -68,8 +68,13 @@ mimic 從屬關節**不在** action 裡（第四課）。
 
 `policy = RslRlPpoActorCriticCfg(...)` 已棄用；5.x 要分開設 `actor`／`critic`（`RslRlMLPModelCfg`，內建 `class_name="MLPModel"`），否則 `OnPolicyRunner` 會 `KeyError: 'class_name'`。
 
+`RslRlMLPModelCfg.to_dict()` 仍會帶出舊欄位 `stochastic`／`init_noise_std`；直接丟進 `OnPolicyRunner` 會 `TypeError: MLPModel(..., stochastic=...)`。官方 entrypoint 會先呼叫 `handle_deprecated_rsl_rl_cfg` 清掉這些欄位，本課也一樣：
+
 ```python
-from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
+from isaaclab_rl.rsl_rl import (
+    RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg, handle_deprecated_rsl_rl_cfg,
+)
+from isaaclab_rl.rsl_rl.utils import check_rsl_rl_version
 
 @configclass
 class Q1PPORunnerCfg(RslRlOnPolicyRunnerCfg):
@@ -86,6 +91,9 @@ class Q1PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     algorithm = RslRlPpoAlgorithmCfg(value_loss_coef=1.0, use_clipped_value_loss=True, clip_param=0.2, entropy_coef=0.005,
                                      num_learning_epochs=5, num_mini_batches=4, learning_rate=1e-3, schedule="adaptive",
                                      gamma=0.99, lam=0.95, desired_kl=0.01, max_grad_norm=1.0)
+
+runner_cfg = handle_deprecated_rsl_rl_cfg(Q1PPORunnerCfg(), check_rsl_rl_version())
+runner = OnPolicyRunner(env, runner_cfg.to_dict(), log_dir=..., device=...)
 ```
 
 統一 CLI（任務註冊後）：

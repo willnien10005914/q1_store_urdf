@@ -336,8 +336,75 @@ class AgentTests(unittest.TestCase):
         body = "\n".join(line for line in fixed.splitlines() if not line.startswith("# [Hermes]"))
         self.assertIn("RslRlMLPModelCfg", body)
         self.assertIn("actor =", body)
+        self.assertIn("handle_deprecated_rsl_rl_cfg", body)
         self.assertNotIn("RslRlPpoActorCriticCfg", body)
         self.assertIn("MLPModel", note)
+
+    def test_fix_l06_stochastic_ships_canonical(self):
+        err = (
+            'File "example.py", line 186, in <module>\n'
+            "    runner = OnPolicyRunner(wrapped, runner_cfg.to_dict(), log_dir=str(JOB), device=env.device)\n"
+            "TypeError: MLPModel.__init__() got an unexpected keyword argument 'stochastic'\n"
+        )
+        self.assertTrue(EXAMPLE_API_HINT.search(err))
+        broken = (
+            "from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg\n"
+            "from rsl_rl.runners import OnPolicyRunner\n"
+            "runner_cfg = Q1RunnerCfg()\n"
+            "runner = OnPolicyRunner(wrapped, runner_cfg.to_dict(), log_dir=str(JOB), device=env.device)\n"
+        )
+        canon = (ROOT / "tutorials/lessons/l06-manager-based-ppo/example.py").read_text()
+        fixed, note = fix_known_example_api_errors(
+            broken, err, "l06-manager-based-ppo", canonical_code=canon,
+        )
+        body = "\n".join(line for line in fixed.splitlines() if not line.startswith("# [Hermes]"))
+        self.assertIn("handle_deprecated_rsl_rl_cfg", body)
+        self.assertIn("check_rsl_rl_version", body)
+        self.assertIn("stochastic", note.lower() + body.lower())
+
+    def test_fix_l07_visualizer_kind_ships_canonical(self):
+        err = (
+            'File "example.py", line 115, in <module>\n'
+            '    visualizers.append(VisualizerCfg(kind="viser", port=PORT))\n'
+            "TypeError: VisualizerCfg.__init__() got an unexpected keyword argument 'kind'\n"
+        )
+        self.assertTrue(EXAMPLE_API_HINT.search(err))
+        broken = (
+            "from isaaclab.visualizers import VisualizerCfg\n"
+            "visualizers = []\n"
+            'visualizers.append(VisualizerCfg(kind="viser", port=8081, eye=(2.5, 2.5, 1.5), lookat=(0.0, 0.0, 0.6)))\n'
+            "sim_cfg.visualizers = visualizers\n"
+            'recorder = VideoRecorderCfg(source="viz:kit", fps=30, length=10, output_dir="." ).create()\n'
+        )
+        canon = (ROOT / "tutorials/lessons/l07-visualizers-and-recording/example.py").read_text()
+        fixed, note = fix_known_example_api_errors(
+            broken, err, "l07-visualizers-and-recording", canonical_code=canon,
+        )
+        body = "\n".join(line for line in fixed.splitlines() if not line.startswith("# [Hermes]"))
+        self.assertIn("ViserVisualizerCfg", body)
+        self.assertIn("visualizer_cfgs", body)
+        self.assertNotIn('VisualizerCfg(kind=', body)
+        self.assertIn("visualizer", note.lower())
+
+    def test_runtime_l08_prefers_isaaclab_venv_python(self):
+        meta = self.t.lesson_meta("l08-policy-export-deployment")
+        runtime = self.t.runtime_for(meta)
+        self.assertEqual(runtime["mode"], "python")
+        lab = self.t.isaaclab3_root
+        if lab and (lab / ".venv" / "bin" / "python").is_file():
+            self.assertEqual(runtime["command"][0], str(lab / ".venv" / "bin" / "python"))
+            self.assertIn("Isaac Lab 3 venv", runtime["label"])
+
+    def test_runtime_l07_adds_viser_extra(self):
+        meta = self.t.lesson_meta("l07-visualizers-and-recording")
+        runtime = self.t.runtime_for(meta, {"viz": "viser"})
+        if runtime.get("mode") == "isaaclab3":
+            cmd = runtime["command"]
+            self.assertIn("--extra", cmd)
+            # importers + viser
+            extras = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "--extra"]
+            self.assertIn("importers", extras)
+            self.assertIn("viser", extras)
 
     def test_fix_get_masses_to_body_mass(self):
         err = "AttributeError: 'ArticulationView' object has no attribute 'get_masses'\n"

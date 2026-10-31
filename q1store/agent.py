@@ -102,9 +102,10 @@ ISAAC_SIM_MISSING_HINT = re.compile(
 )
 EXAMPLE_API_HINT = re.compile(
     r"unexpected keyword argument|TypeError:|AttributeError:|KeyError:|got an unexpected keyword|"
-    r"NewtonCfg\.__init__|PhysxCfg\.__init__|has no attribute|"
-    r"get_masses|body_mass|class_name|RslRlPpoActorCriticCfg|"
-    r"File \"example\.py\"|"
+    r"NewtonCfg\.__init__|PhysxCfg\.__init__|VisualizerCfg\.__init__|has no attribute|"
+    r"get_masses|body_mass|class_name|RslRlPpoActorCriticCfg|stochastic|"
+    r"VisualizerCfg\(kind=|VideoRecorderCfg.*\.create\(|source=['\"]viz:"
+    r"|File \"example\.py\"|"
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
 )
@@ -271,7 +272,10 @@ class Agent:
             "Answer in the learner's language (Traditional Chinese by default; English if they write English). Be precise about 3.0 facts: "
             "ProxyArray (.torch/.warp), XYZW quaternions, write_*_to_sim_index/_mask, robot.actuators.target_command.set_*_index, "
             "actuator_effort_limit vs joint_effort_limit, launch_simulation, physics=newton_mjwarp|isaacsim_physx|ovphysx, HEADLESS=1 (no --headless), "
-            "VisualizerCfg/VideoRecorderCfg, --checkpoint latest|best. If unsure, search instead of guessing, and cite URLs.\n\n"
+            "ViserVisualizerCfg/RerunVisualizerCfg on sim.visualizer_cfgs (NOT VisualizerCfg(kind=…)), "
+            "VideoRecorderCfg(source='visualizer:kit') on env.video_recorders (no .create()), "
+            "handle_deprecated_rsl_rl_cfg before OnPolicyRunner(...to_dict()), --checkpoint latest|best. "
+            "If unsure, search instead of guessing, and cite URLs.\n\n"
             "When the learner reports a failed run, asks to 修復/fix an error, or pastes a Traceback: "
             "1) call read_run_log (or use the Latest run block below), 2) if the error mentions CUDA/driver/torch call diagnose_runtime, "
             "3) if diagnose reports torch/driver mismatch call repair_isaaclab_cuda, "
@@ -355,12 +359,23 @@ class Agent:
         if wants_edit:
             yield from self._edit_chat(uid, lesson, context, message)
             return
-        force_tools = cmd.startswith("/") or bool(REPAIR_HINT.search(message)) or wants_analyze
+        last_err_blob = (
+            f"{(context.get('last_run') or {}).get('error') or ''} "
+            f"{(context.get('last_run') or {}).get('log_tail') or ''}"
+        )
+        # Failed example.py Tracebacks must go through the offline repair tools even when the
+        # learner only says「怎麼辦」— the 8B GGUF rarely calls apply_code on its own.
+        force_tools = (
+            cmd.startswith("/")
+            or bool(REPAIR_HINT.search(message))
+            or wants_analyze
+            or bool(EXAMPLE_API_HINT.search(last_err_blob))
+        )
         if force_tools:
             note = (
                 "以工具模式分析最近執行結果（result／evaluation／影片／rollout）。"
                 if wants_analyze or cmd in ("/analyze", "/result")
-                else "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI）。"
+                else "以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers／PhysxJointAPI／example.py API）。"
             )
             yield from OfflineTutor(self).respond(uid, lesson, context, message, note=note)
             return
@@ -976,6 +991,9 @@ class OfflineTutor:
             self.t.memory_add(uid, [rest.strip()])
             answer_parts.append("已記住。")
         elif cmd in ("/log", "/diagnose", "/fix") or physx_in_msg or (wants_fix and cmd not in self.COMMANDS):
+            # Auto-apply known example.py API fixes whenever the last run Traceback matches —
+            # /log and /diagnose stay read-only unless the learner also asked to fix.
+            api_traceback = bool(EXAMPLE_API_HINT.search(last_err))
             yield from self._repair_flow(
                 uid, lesson, context, answer_parts, reasoning,
                 do_repair=(
@@ -984,6 +1002,7 @@ class OfflineTutor:
                     or "修" in message
                     or "fix" in message.lower()
                     or "repair" in message.lower()
+                    or (api_traceback and cmd not in ("/log", "/diagnose"))
                 ),
                 message=message,
             )
@@ -1280,6 +1299,19 @@ class OfflineTutor:
         return "\n".join(lines)
 
 
+def _strip_hermes_marks(code: str) -> str:
+    """Compare example.py bodies without Hermes attribution lines."""
+    return "\n".join(
+        line for line in (code or "").splitlines() if not line.lstrip().startswith("# [Hermes]")
+    ).strip()
+
+
+def _ship_canonical(canon: str, lesson_id: str, notes: list[str]) -> tuple[str, str]:
+    note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
+    body = canon if canon.endswith("\n") else canon + "\n"
+    return _stamp_hermes_note(body, note), note
+
+
 def fix_known_example_api_errors(
     code: str, err_text: str, lesson_id: str = "", canonical_code: str = "",
 ) -> tuple[str, str]:
@@ -1289,21 +1321,23 @@ def fix_known_example_api_errors(
     text = code
     notes: list[str] = []
     err = err_text or ""
+    canon = (canonical_code or "").strip()
+    lid = lesson_id or ""
+
+    def canon_newer() -> bool:
+        return bool(canon) and _strip_hermes_marks(canon) != _strip_hermes_marks(text)
 
     # Hardcoded PhysxCfg / UrdfConverter without Kit → ship kitless Newton + UrdfFileCfg lesson file.
     if ISAAC_SIM_MISSING_HINT.search(err) and (
         re.search(r"physics\s*=\s*PhysxCfg\s*\(", text)
         or "UrdfConverter" in text
-        or (lesson_id or "").startswith("l04")
+        or lid.startswith("l04")
     ):
-        canon = (canonical_code or "").strip()
-        if canon and "NewtonCfg" in canon and "UrdfFileCfg" in canon and canon != text.strip():
+        if canon and "NewtonCfg" in canon and "UrdfFileCfg" in canon and canon_newer():
             notes.append(
                 "PhysxCfg/UrdfConverter（需完整 Isaac Sim）→ 課程預設 newton_mjwarp + UrdfFileCfg（kitless）"
             )
-            note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
-            stamped = _stamp_hermes_note(canon if canon.endswith("\n") else canon + "\n", note)
-            return stamped, note
+            return _ship_canonical(canon, lid, notes)
         # Fallback: swap the launch block only.
         if re.search(r"physics\s*=\s*PhysxCfg\s*\(", text):
             text2 = re.sub(
@@ -1330,21 +1364,83 @@ def fix_known_example_api_errors(
                 notes.append("PhysxCfg() 硬編碼 → physics preset（預設 newton_mjwarp）")
 
     # Deprecated RSL-RL policy=ActorCritic → actor/critic MLPModel (needs class_name).
-    if (
+    # Also: MLPModel(..., stochastic=...) when to_dict() skipped handle_deprecated_rsl_rl_cfg.
+    rsl_err = (
         ("class_name" in err and ("actor" in err.lower() or "KeyError" in err))
+        or "stochastic" in err
         or "RslRlPpoActorCriticCfg" in text
-    ) and (
+    )
+    rsl_body = (
         "RslRlPpoActorCriticCfg" in text
         or re.search(r"\bpolicy\s*=\s*RslRlPpoActorCriticCfg\s*\(", text)
-        or (lesson_id or "").startswith("l06")
-    ):
-        canon = (canonical_code or "").strip()
-        if canon and "RslRlMLPModelCfg" in canon and "actor =" in canon and canon != text.strip():
+        or "OnPolicyRunner" in text
+        or lid.startswith("l06")
+    )
+    if rsl_err and rsl_body:
+        if (
+            canon
+            and "RslRlMLPModelCfg" in canon
+            and "handle_deprecated_rsl_rl_cfg" in canon
+            and "actor =" in canon
+            and canon_newer()
+        ):
             notes.append(
-                "deprecated policy=ActorCritic → actor/critic=MLPModel（rsl-rl 5.x class_name）"
+                "RSL-RL runner：actor/critic=MLPModel + handle_deprecated_rsl_rl_cfg（清掉 stochastic）"
             )
-            note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
-            return _stamp_hermes_note(canon if canon.endswith("\n") else canon + "\n", note), note
+            return _ship_canonical(canon, lid, notes)
+        if "handle_deprecated_rsl_rl_cfg" not in text and "OnPolicyRunner" in text and ".to_dict()" in text:
+            # Minimal surgical fix when canonical is unavailable / still old.
+            text2 = re.sub(
+                r"(\n\s*)(runner\s*=\s*OnPolicyRunner\s*\(\s*[^,]+,\s*)([A-Za-z_][\w]*)\.to_dict\(\)",
+                r"\1from isaaclab_rl.rsl_rl import handle_deprecated_rsl_rl_cfg\n"
+                r"\1from isaaclab_rl.rsl_rl.utils import check_rsl_rl_version\n"
+                r"\1\3 = handle_deprecated_rsl_rl_cfg(\3, check_rsl_rl_version())\n"
+                r"\1\2\3.to_dict()",
+                text,
+                count=1,
+            )
+            if text2 != text:
+                text = text2
+                notes.append("OnPolicyRunner(...) 前加 handle_deprecated_rsl_rl_cfg（清掉 stochastic）")
+
+    # VisualizerCfg(kind=...) is invalid — Lab 3 uses concrete isaaclab_visualizers.* cfgs.
+    viz_body = (
+        "VisualizerCfg(kind=" in text
+        or "sim_cfg.visualizers" in text
+        or re.search(r"VideoRecorderCfg\([^)]*\)\.create\s*\(", text) is not None
+        or "source=\"viz:" in text
+        or "source='viz:" in text
+    )
+    viz_err = (
+        re.search(r"unexpected keyword argument ['\"]kind['\"]", err, re.I) is not None
+        or (lid.startswith("l07") and viz_body)
+        or viz_body and ("TypeError" in err or "AttributeError" in err or "kind" in err)
+    )
+    if viz_err and viz_body:
+        if (
+            canon
+            and ("ViserVisualizerCfg" in canon or "visualizer_cfgs" in canon)
+            and canon_newer()
+        ):
+            notes.append(
+                "VisualizerCfg(kind=…)／VideoRecorderCfg.create() → concrete visualizer_cfgs + rollout 錄影契約"
+            )
+            return _ship_canonical(canon, lid, notes)
+
+    # Generic: example.py TypeError/KeyError/AttributeError and the lesson file is newer — ship it.
+    if (
+        canon_newer()
+        and re.search(r"File \"example\.py\"", err)
+        and re.search(r"TypeError:|KeyError:|AttributeError:|unexpected keyword", err, re.I)
+        and (
+            lid.startswith(("l02", "l04", "l06", "l07", "l08"))
+            or "OnPolicyRunner" in text
+            or "VisualizerCfg" in text
+            or "NewtonCfg" in text
+        )
+    ):
+        notes.append("課程最新 example.py（對齊已安裝 Isaac Lab 3 API）")
+        return _ship_canonical(canon, lid, notes)
 
     # root_view.get_masses() is PhysX-only; Lab 3 portable path is data.body_mass (ProxyArray).
     if "get_masses" in err or re.search(r"root_view\.get_masses\s*\(", text):
@@ -1388,7 +1484,7 @@ def fix_known_example_api_errors(
 
     if text == code:
         return code, ""
-    note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
+    note = f"Hermes 修正 {lid or 'example.py'} Lab 3 API：" + "；".join(notes)
     return _stamp_hermes_note(text, note), note
 
 
