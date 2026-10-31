@@ -1315,6 +1315,39 @@ def _ship_canonical(canon: str, lesson_id: str, notes: list[str]) -> tuple[str, 
     return _stamp_hermes_note(body, note), note
 
 
+def heal_stale_example_draft(
+    code: str, lesson_id: str = "", canonical_code: str = "",
+) -> tuple[str, str]:
+    """Heal known-broken drafts from code shape alone (no Traceback required).
+
+    Used when the learner keeps clicking「執行」with an old Lab editor draft
+    (e.g. ``NewtonCfg()`` without ``njmax``) after the lesson file was fixed.
+    """
+    if not code:
+        return code, ""
+    lid = lesson_id or ""
+    synth: list[str] = []
+    if re.search(r"NewtonCfg\s*\(\s*\)", code) and "njmax" not in code:
+        synth.append("nefc overflow - please increase njmax to 1000\ncontains NaN values")
+    elif lid.startswith("l06") and "OnPolicyRunner" in code and "njmax" not in code and "MJWarpSolverCfg" in (canonical_code or ""):
+        # Any l06 draft that never got the locomotion-capacity NewtonCfg.
+        synth.append("nefc overflow - please increase njmax to 1000\ncontains NaN values")
+    if "VisualizerCfg(kind=" in code or "sim_cfg.visualizers" in code:
+        synth.append("TypeError: VisualizerCfg.__init__() got an unexpected keyword argument 'kind'")
+    if "RslRlPpoActorCriticCfg" in code or (
+        lid.startswith("l06")
+        and "OnPolicyRunner" in code
+        and "handle_deprecated_rsl_rl_cfg" not in code
+        and ".to_dict()" in code
+    ):
+        synth.append("TypeError: MLPModel.__init__() got an unexpected keyword argument 'stochastic'")
+    if re.search(r"obs\s*,\s*_\s*=\s*wrapped\.get_observations\s*\(", code):
+        synth.append("ValueError: too many values to unpack (expected 2)")
+    if not synth:
+        return code, ""
+    return fix_known_example_api_errors(code, "\n".join(synth), lid, canonical_code)
+
+
 def fix_known_example_api_errors(
     code: str, err_text: str, lesson_id: str = "", canonical_code: str = "",
 ) -> tuple[str, str]:

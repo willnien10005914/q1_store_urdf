@@ -238,6 +238,21 @@ class Tutorial:
                 return meta
         raise APIError("找不到這堂課。", 404)
 
+    def _heal_example_code(self, lesson_id, code):
+        """Rewrite known-broken Lab editor drafts to the current lesson example.py."""
+        if not isinstance(code, str) or not code.strip():
+            return code, ""
+        canon_path = self.lessons_dir / lesson_id / "example.py"
+        canon = canon_path.read_text() if canon_path.is_file() else ""
+        try:
+            from q1store.agent import heal_stale_example_draft
+        except Exception:
+            return code, ""
+        try:
+            return heal_stale_example_draft(code, lesson_id, canon)
+        except Exception:
+            return code, ""
+
     def lesson(self, lesson_id, robot="leg", user_id=None):
         meta = dict(self.lesson_meta(lesson_id))
         directory = self.lessons_dir / lesson_id
@@ -250,7 +265,16 @@ class Tutorial:
             row = self.get("progress", f"{user_id}:{lesson_id}")
             meta["progress"] = row
             if row and row.get("draft_code"):
-                meta["draft_code"] = row["draft_code"]
+                healed, note = self._heal_example_code(lesson_id, row["draft_code"])
+                if note and healed and healed != row["draft_code"]:
+                    row["draft_code"] = healed
+                    row["draft_healed"] = note
+                    row["updated_at"] = now_iso(self.clock())
+                    self.save_progress_row(row)
+                    meta["draft_code"] = healed
+                    meta["draft_healed"] = note
+                else:
+                    meta["draft_code"] = row["draft_code"]
             if row and row.get("last_params"):
                 meta["last_params"] = row["last_params"]
         meta["quiz"] = [{k: v for k, v in q.items() if k not in ("answer", "explain")} for q in meta.get("quiz", [])]
@@ -472,6 +496,12 @@ class Tutorial:
         code = code if isinstance(code, str) and code.strip() else (self.lessons_dir / lesson_id / "example.py").read_text()
         if len(code) > MAX_CODE:
             raise APIError("程式碼太大。")
+        # Old Lab drafts (e.g. NewtonCfg() without njmax) must not keep failing after the lesson file is fixed.
+        healed, heal_note = self._heal_example_code(lesson_id, code)
+        if heal_note and healed and healed != code:
+            code = healed
+        if len(code) > MAX_CODE:
+            raise APIError("程式碼太大。")
         runtime = self.runtime_for(meta, clean)
         run_id = uuid.uuid4().hex
         directory = self.run_dir(run_id)
@@ -481,8 +511,12 @@ class Tutorial:
                        "store_root": str(self.root), "lesson_id": lesson_id, "run_id": run_id}
         (directory / "params.json").write_text(json.dumps(full_params, ensure_ascii=False, indent=2))
         (directory / "example.py").write_text(code)
+        if heal_note:
+            (directory / "heal_note.txt").write_text(heal_note + "\n", encoding="utf-8")
+        canon_text = (self.lessons_dir / lesson_id / "example.py").read_text()
         run = {"id": run_id, "user_id": uid, "lesson_id": lesson_id, "lesson_title": meta.get("title"), "robot": robot, "params": clean,
-               "code_sha256": hashlib.sha256(code.encode()).hexdigest(), "code_modified": code != (self.lessons_dir / lesson_id / "example.py").read_text(),
+               "code_sha256": hashlib.sha256(code.encode()).hexdigest(), "code_modified": code != canon_text,
+               "healed": bool(heal_note), "heal_note": heal_note or None,
                "runtime": runtime, "trainable": bool(meta["run"].get("trainable")), "resumable": bool(meta["run"].get("resumable")),
                "state": "queued", "phase": None, "progress": None, "result": None, "error": None, "pid": None,
                "created_at": now_iso(self.clock()), "started_at": None, "finished_at": None, "resumed": 0}
@@ -494,8 +528,11 @@ class Tutorial:
         row["robot"] = robot
         row["runs"] = (row.get("runs") or [])[-49:] + [run_id]
         row["last_params"] = clean
-        if run["code_modified"]:
+        # Always persist the healed body so the Lab editor stops re-sending NewtonCfg().
+        if heal_note or run["code_modified"]:
             row["draft_code"] = code
+            if heal_note:
+                row["draft_healed"] = heal_note
         self.save_progress_row(row)
         self.touch_last(uid, lesson_id, robot)
         self._pump()

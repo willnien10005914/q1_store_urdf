@@ -14,7 +14,8 @@ from unittest import mock
 from q1store.agent import (
     Agent, OfflineTutor, TagStreamer, inject_progress_logging, EDIT_HINT, REPAIR_HINT,
     EXAMPLE_API_HINT, ISAAC_SIM_MISSING_HINT, apply_simple_code_intent, extract_fenced_python,
-    fix_known_example_api_errors, normalize_hermes_tags, strip_leaked_hermes_tags,
+    fix_known_example_api_errors, heal_stale_example_draft, normalize_hermes_tags,
+    strip_leaked_hermes_tags,
 )
 from q1store.llm import LLMManager, MODELS
 from q1store.service import Store
@@ -363,6 +364,39 @@ class AgentTests(unittest.TestCase):
         self.assertIn("MJWarpSolverCfg", body)
         self.assertIn("implicitfast", body)
         self.assertRegex(note.lower(), r"nefc|njmax|nan")
+
+    def test_heal_stale_l06_draft_without_traceback(self):
+        broken = (
+            "from isaaclab_newton.physics import NewtonCfg\n"
+            "sim_cfg.physics = NewtonCfg()\n"
+            "from rsl_rl.runners import OnPolicyRunner\n"
+            "runner = OnPolicyRunner(wrapped, runner_cfg.to_dict(), log_dir=str(JOB), device=env.device)\n"
+            "runner.learn(num_learning_iterations=chunk, init_at_random_ep_len=True)\n"
+        )
+        canon = (ROOT / "tutorials/lessons/l06-manager-based-ppo/example.py").read_text()
+        fixed, note = heal_stale_example_draft(broken, "l06-manager-based-ppo", canon)
+        self.assertIn("njmax", fixed)
+        self.assertIn("MJWarpSolverCfg", fixed)
+        self.assertTrue(note)
+
+    def test_create_run_heals_stale_l06_newtoncfg_draft(self):
+        broken = (
+            "from isaaclab_newton.physics import NewtonCfg\n"
+            "sim_cfg.physics = NewtonCfg()\n"
+            "from rsl_rl.runners import OnPolicyRunner\n"
+            "runner = OnPolicyRunner(wrapped, runner_cfg.to_dict(), log_dir='.', device='cpu')\n"
+            "runner.learn(num_learning_iterations=1, init_at_random_ep_len=True)\n"
+        )
+        # Block actual launch: runtime will be isaaclab3 but we cancel after create by not pumping —
+        # create_run only queues; with start_threads=False _pump is still called but may no-op.
+        run = self.t.create_run(self.uid, "l06-manager-based-ppo", "leg", {"num_envs": 16, "max_iterations": 10}, broken)
+        self.assertTrue(run.get("healed"))
+        written = (self.t.run_dir(run["id"]) / "example.py").read_text()
+        self.assertIn("njmax", written)
+        self.assertIn("MJWarpSolverCfg", written)
+        self.assertNotRegex(written, r"NewtonCfg\s*\(\s*\)")
+        draft = self.t.progress_row(self.uid, "l06-manager-based-ppo").get("draft_code") or ""
+        self.assertIn("njmax", draft)
 
     def test_fix_l06_stochastic_ships_canonical(self):
         err = (
