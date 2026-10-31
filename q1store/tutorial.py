@@ -1102,7 +1102,12 @@ class Tutorial:
                 "sources": [s if isinstance(s, str) else f"{s.get('type', 'web')} | {s.get('title', '')} | {s.get('url', '')}" for s in sources]}
         path = self.proposals_dir / "pending" / f"{pid}.md"
         path.write_text(dump_front_matter(meta, body))
-        self.add_ticker(f"新課程提案：{title}", kind="proposal", proposal_id=pid)
+        self.add_ticker(
+            f"新課程提案：{title}",
+            kind="proposal",
+            proposal_id=pid,
+            text_en=f"New course proposal: {title}",
+        )
         return self.proposal(pid)
 
     def set_proposal_status(self, proposal_id, status):
@@ -1132,7 +1137,15 @@ class Tutorial:
         lesson["from_proposal"] = proposal_id
         lesson_path.write_text(json.dumps(lesson, ensure_ascii=False, indent=2) + "\n")
         self._lesson_cache.pop(lesson_id, None)
-        self.add_ticker(f"課程已建立：{lesson.get('title', lesson_id)}", kind="created", proposal_id=proposal_id, lesson_id=lesson_id)
+        title = lesson.get("title_en") or lesson.get("title", lesson_id)
+        title_zh = lesson.get("title") or lesson.get("title_en") or lesson_id
+        self.add_ticker(
+            f"課程已建立：{title_zh}",
+            kind="created",
+            proposal_id=proposal_id,
+            lesson_id=lesson_id,
+            text_en=f"Lesson created: {title}",
+        )
         return self.proposal(proposal_id)
 
     def cursor_prompt(self, proposal_id):
@@ -1272,7 +1285,11 @@ class Discovery:
             s.update(last_run=result["at"], last_run_ts=self.t.clock(), last_result=result)
             self.save(s)
             if not created:
-                self.t.add_ticker("Hermes 掃描完成：沒有新的 Isaac Lab 3 課程素材", kind="scan")
+                self.t.add_ticker(
+                    "Hermes 掃描完成：沒有新的 Isaac Lab 3 課程素材",
+                    kind="scan",
+                    text_en="Hermes scan finished: no new Isaac Lab 3 course material",
+                )
             return result
         finally:
             self.running = False

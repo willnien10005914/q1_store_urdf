@@ -854,16 +854,38 @@ function startTickerMotion(scrollEl, {reset = false} = {}) {
   }
 }
 
+function tickerItemText(it) {
+  if (!it) return '';
+  if (getLocale() === 'en') {
+    if (it.text_en) return it.text_en;
+    const zh = String(it.text || '');
+    // Legacy ticker rows stored only Chinese prefixes — rewrite for EN UI.
+    const pairs = [
+      ['新課程提案：', 'New course proposal: '],
+      ['課程已建立：', 'Lesson created: '],
+      ['Hermes 掃描完成：沒有新的 Isaac Lab 3 課程素材', 'Hermes scan finished: no new Isaac Lab 3 course material'],
+      ['Hermes 掃描完成：', 'Hermes scan finished: '],
+    ];
+    for (const [from, to] of pairs) {
+      if (zh.startsWith(from)) return to + zh.slice(from.length);
+      if (zh === from) return to;
+    }
+    return zh;
+  }
+  return it.text || it.text_en || '';
+}
+
 async function updateTicker() {
   try {
     const data = await api('/api/tutorial/ticker');
     const scroll = $('ticker-scroll');
     const items = data.items?.length ? data.items : [{text: getLocale()==='en'?'No new suggestions yet.':'尚無新建議。'}];
-    const sig = items.map((it) => it.text || it.proposal_id || it.lesson_id || '').join('|');
+    const sig = getLocale() + '|' + items.map((it) => tickerItemText(it) || it.proposal_id || it.lesson_id || '').join('|');
     const html = items.map((it) => {
-      if (it.proposal_id) return `<a href="#proposal-${it.proposal_id}" data-proposal="${it.proposal_id}">${escapeHtml(it.text)}</a>`;
-      if (it.lesson_id) return `<a href="#${it.lesson_id}">${escapeHtml(it.text)}</a>`;
-      return `<span>${escapeHtml(it.text)}</span>`;
+      const label = tickerItemText(it);
+      if (it.proposal_id) return `<a href="#proposal-${it.proposal_id}" data-proposal="${it.proposal_id}">${escapeHtml(label)}</a>`;
+      if (it.lesson_id) return `<a href="#${it.lesson_id}">${escapeHtml(label)}</a>`;
+      return `<span>${escapeHtml(label)}</span>`;
     }).join('');
     if (sig !== tickerMotion.sig) {
       tickerMotion.sig = sig;
