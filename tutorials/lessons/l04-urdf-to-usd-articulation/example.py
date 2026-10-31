@@ -129,7 +129,8 @@ with launch_simulation(sim_cfg):
     vel_limits = robot.data.joint_vel_limits.torch[0]
     stiff = robot.data.joint_stiffness.torch[0]
     damp = robot.data.joint_damping.torch[0]
-    masses = robot.root_view.get_masses() if hasattr(robot, "root_view") else None
+    # Lab 3 portable mass buffer (ProxyArray). root_view.get_masses() is PhysX-only; Newton ArticulationView lacks it.
+    masses = robot.data.body_mass.torch
     rows = []
     for index, name in enumerate(robot.joint_names):
         source = urdf_joints.get(name, {})
@@ -147,7 +148,7 @@ with launch_simulation(sim_cfg):
               "imported_not_in_control": sorted(imported - set(control)),
               "mimic_followers": sorted(name for name, j in urdf_joints.items() if j["mimic_of"] and name in imported),
               "urdf_inertial_mass_kg": round(urdf_mass, 3),
-              "articulation_mass_kg": round(float(masses[0].sum()), 3) if masses is not None else None,
+              "articulation_mass_kg": round(float(masses[0].sum().item()), 3),
               "joints": rows}
     (JOB / "result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
     progress("complete", 3, 3, num_joints=robot.num_joints, missing=len(result["control_joints_missing"]))

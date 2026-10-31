@@ -301,6 +301,15 @@ class AgentTests(unittest.TestCase):
         self.assertIn("q1_store_urdf", tokens)
         self.assertNotIn("請貼出關鍵行", tokens)
 
+    def test_fix_get_masses_to_body_mass(self):
+        err = "AttributeError: 'ArticulationView' object has no attribute 'get_masses'\n"
+        broken = "masses = robot.root_view.get_masses() if hasattr(robot, \"root_view\") else None\n"
+        fixed, note = fix_known_example_api_errors(broken, err, "l04-urdf-to-usd-articulation")
+        self.assertIn("robot.data.body_mass.torch", fixed)
+        body = "\n".join(line for line in fixed.splitlines() if not line.startswith("# [Hermes]"))
+        self.assertNotIn("get_masses()", body)
+        self.assertIn("body_mass", note)
+
     def test_fix_l04_isaac_sim_missing_applies_kitless(self):
         err = (
             "[ERROR] Isaac Sim is not installed or not found on PYTHONPATH.\n"

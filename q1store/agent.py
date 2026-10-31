@@ -102,6 +102,7 @@ ISAAC_SIM_MISSING_HINT = re.compile(
 EXAMPLE_API_HINT = re.compile(
     r"unexpected keyword argument|TypeError:|AttributeError:|got an unexpected keyword|"
     r"NewtonCfg\.__init__|PhysxCfg\.__init__|has no attribute|"
+    r"get_masses|body_mass|"
     r"File \"example\.py\"|"
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
@@ -1274,6 +1275,18 @@ def fix_known_example_api_errors(
             if text2 != text:
                 text = text2
                 notes.append("PhysxCfg() 硬編碼 → physics preset（預設 newton_mjwarp）")
+
+    # root_view.get_masses() is PhysX-only; Lab 3 portable path is data.body_mass (ProxyArray).
+    if "get_masses" in err or re.search(r"root_view\.get_masses\s*\(", text):
+        text2, n = re.subn(
+            r"(?:wp\.to_torch\()?(?:robot|articulation)\.root_view\.get_masses\s*\(\s*\)\)?"
+            r"(?:\s+if\s+hasattr\s*\(\s*(?:robot|articulation)\s*,\s*['\"]root_view['\"]\s*\)\s*else\s+None)?",
+            "robot.data.body_mass.torch",
+            text,
+        )
+        if n:
+            text = text2
+            notes.append("root_view.get_masses() → robot.data.body_mass.torch（Newton／PhysX 通用）")
 
     # NewtonCfg(solver_iterations=N) is invalid in Lab 3 — iterations live on MJWarpSolverCfg.
     if (
