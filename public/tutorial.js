@@ -35,7 +35,8 @@ const state = {
   baselineCode: '',
   codeMarks: {}, // lineIndex -> {source:'manual'|'hermes'|'note', note?}
   codeEditTimer: null,
-  codeWide: false,
+  codeWide: false,   // widen code vs params inside .tut-lab
+  codeFocus: false,  // hide left lesson nav + right Hermes (full-bleed code)
   runId: null,
   lastRun: null,
   runPoll: null,
@@ -58,27 +59,69 @@ function layoutEl() {
   return document.querySelector('.tut-layout');
 }
 
-function setCodeExpanded(on) {
-  const editing = !!on || state.codeWide;
+function syncLayoutChrome() {
+  const editing = state.codeWide || state.codeFocus || document.activeElement === $('code');
   const lab = labEl();
   const page = pageEl();
   const layout = layoutEl();
-  lab?.classList.toggle('is-editing', editing);
-  lab?.classList.toggle('is-wide', state.codeWide);
-  // Page chrome must yield space — lab-internal fr tweaks alone cannot beat the 3-column shell.
-  page?.classList.toggle('is-code-editing', editing && !state.codeWide);
-  page?.classList.toggle('is-code-focus', state.codeWide);
-  layout?.classList.toggle('is-code-editing', editing && !state.codeWide);
-  layout?.classList.toggle('is-code-focus', state.codeWide);
-  document.body.classList.toggle('tut-code-focus', state.codeWide);
-  if (!state.codeWide && lab) lab.style.removeProperty('grid-template-columns');
-  const btn = $('code-widen');
-  if (btn) {
-    btn.textContent = state.codeWide
-      ? (getLocale() === 'en' ? 'Exit focus' : '離開專注')
-      : (getLocale() === 'en' ? 'Widen' : '加寬');
+  lab?.classList.toggle('is-editing', editing || state.codeWide);
+  lab?.classList.toggle('is-wide', state.codeWide || state.codeFocus);
+  // Widen middle code without hiding sidebars; focus is the only mode that collapses them.
+  page?.classList.toggle('is-code-editing', (editing || state.codeWide) && !state.codeFocus);
+  page?.classList.toggle('is-code-focus', state.codeFocus);
+  layout?.classList.toggle('is-code-editing', (editing || state.codeWide) && !state.codeFocus);
+  layout?.classList.toggle('is-code-focus', state.codeFocus);
+  document.body.classList.toggle('tut-code-focus', state.codeFocus);
+  if (!state.codeWide && !state.codeFocus && lab) lab.style.removeProperty('grid-template-columns');
+
+  const widenBtn = $('code-widen');
+  if (widenBtn) {
+    widenBtn.textContent = state.codeWide
+      ? (getLocale() === 'en' ? 'Narrow code' : '縮回程式區')
+      : (getLocale() === 'en' ? 'Widen code' : '加寬程式區');
+    widenBtn.title = state.codeWide
+      ? (getLocale() === 'en' ? 'Restore code / params split' : '還原程式區與參數欄比例')
+      : (getLocale() === 'en' ? 'Give example.py more width (keeps side panels)' : '加寬 example.py（保留左右欄）');
+    widenBtn.setAttribute('aria-pressed', state.codeWide ? 'true' : 'false');
   }
+  const focusBtn = $('code-focus');
+  if (focusBtn) {
+    focusBtn.textContent = state.codeFocus
+      ? (getLocale() === 'en' ? 'Show side panels' : '顯示左右欄')
+      : (getLocale() === 'en' ? 'Focus' : '專注');
+    focusBtn.title = state.codeFocus
+      ? (getLocale() === 'en' ? 'Restore lesson list and Hermes panels' : '還原左側課程列表與右側 Hermes')
+      : (getLocale() === 'en' ? 'Hide side panels so code fills the page' : '收合左右欄，程式區佔滿畫面');
+    focusBtn.setAttribute('aria-pressed', state.codeFocus ? 'true' : 'false');
+  }
+  const dock = $('layout-restore-dock');
+  if (dock) dock.hidden = !state.codeFocus;
   requestAnimationFrame(() => syncCodeChrome());
+}
+
+function setCodeExpanded(on) {
+  if (!on) {
+    state.codeWide = false;
+    state.codeFocus = false;
+  }
+  syncLayoutChrome();
+}
+
+function setCodeWide(on) {
+  state.codeWide = !!on;
+  if (state.codeWide) state.codeFocus = false;
+  syncLayoutChrome();
+}
+
+function setCodeFocus(on) {
+  state.codeFocus = !!on;
+  if (state.codeFocus) {
+    state.codeWide = true;
+    document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
+    document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
+  }
+  syncLayoutChrome();
+  if (state.codeFocus) $('code')?.focus({preventScroll: true});
 }
 
 function lineDiffIndexes(before, after) {
@@ -178,7 +221,7 @@ function annotateChangedLines(before, after, source, explanation) {
 }
 
 function onCodeInput() {
-  setCodeExpanded(true);
+  syncLayoutChrome();
   const ta = $('code');
   const before = state.baselineCode || state.originalCode || '';
   const after = ta.value;
@@ -222,8 +265,14 @@ function wireCodeEditor() {
     const backdrop = $('code-backdrop');
     if (backdrop) backdrop.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
   });
-  ta.addEventListener('focus', () => setCodeExpanded(true));
+  ta.addEventListener('focus', () => syncLayoutChrome());
+  ta.addEventListener('blur', () => requestAnimationFrame(() => syncLayoutChrome()));
   ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.codeFocus) {
+      e.preventDefault();
+      setCodeFocus(false);
+      return;
+    }
     if (e.key === 'Tab') {
       e.preventDefault();
       const start = ta.selectionStart, end = ta.selectionEnd;
@@ -233,21 +282,20 @@ function wireCodeEditor() {
     }
   });
   $('code-widen')?.addEventListener('click', () => {
-    state.codeWide = !state.codeWide;
-    setCodeExpanded(true);
-    if (state.codeWide) {
-      document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
-      document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
-      $('code')?.focus({preventScroll: true});
-    }
+    setCodeWide(!state.codeWide);
+    if (state.codeWide) $('code')?.focus({preventScroll: true});
   });
+  $('code-focus')?.addEventListener('click', () => setCodeFocus(!state.codeFocus));
+  $('layout-restore')?.addEventListener('click', () => setCodeFocus(false));
   const handle = $('code-resize');
   if (handle) {
     let dragging = false;
     handle.addEventListener('pointerdown', (e) => {
       dragging = true;
+      // Drag only resizes code vs params inside the lab — never hide page sidebars.
       state.codeWide = true;
-      setCodeExpanded(true);
+      state.codeFocus = false;
+      syncLayoutChrome();
       labEl()?.classList.add('is-resizing');
       handle.setPointerCapture(e.pointerId);
       e.preventDefault();
@@ -464,6 +512,7 @@ async function openLesson(id) {
   $('lesson-minutes').textContent = (lesson.minutes || '?') + ' min';
   $('lesson-md').innerHTML = renderMarkdown(lesson.markdown || '');
   state.codeWide = false;
+  state.codeFocus = false;
   setCode(lesson.draft_code || lesson.code || '', {baseline: true});
   setCodeExpanded(false);
   renderParams(lesson);

@@ -37,6 +37,10 @@
 .tut-page{max-width:1440px;margin:0 auto;padding:18px 24px 60px;transition:max-width .25s ease,padding .25s ease}
 .tut-page.is-code-editing{max-width:min(1760px,calc(100vw - 16px))}
 .tut-page.is-code-focus{max-width:none;width:100%;padding-left:10px;padding-right:10px}
+.tut-code-toolbar .text-link[aria-pressed="true"]{color:var(--blue);font-weight:600}
+.tut-restore-dock{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:999px;box-shadow:0 10px 30px rgba(20,20,30,.14);font-size:12px;color:#555}
+.tut-restore-dock[hidden]{display:none!important}
+.tut-restore-dock .button{padding:7px 12px;font-size:12px;border-radius:999px}
 .tut-top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:18px;flex-wrap:wrap}
 .tut-top h1{font-size:clamp(24px,2.4vw,34px);letter-spacing:-1px;margin:0 0 6px;font-weight:700}
 .tut-top p{margin:0;color:var(--muted);font-size:12px;line-height:1.7;max-width:640px}
@@ -163,10 +167,13 @@
 .diff-box{max-height:280px;overflow:auto;background:#101216;color:#d7dbe3;border-radius:10px;padding:12px;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
 
 @media(max-width:1100px){
-  .tut-layout{grid-template-columns:1fr}
+  .tut-layout,
+  .tut-layout.is-code-editing{grid-template-columns:1fr}
+  .tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr)}
   .tut-side,.tut-agent{position:static;max-height:none}
-  .tut-lab{grid-template-columns:1fr}
+  .tut-lab,.tut-lab.is-editing,.tut-lab.is-wide{grid-template-columns:1fr}
   .tut-code-resize{display:none}
+  .tut-restore-dock{left:12px;right:12px;transform:none;justify-content:space-between}
   .nav-mega-grid{grid-template-columns:repeat(2,1fr)}
   .nav-mega-panel{left:0;transform:none}
 }
