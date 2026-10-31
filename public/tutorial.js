@@ -1244,6 +1244,17 @@ function pollDownloads() {
   }, 2000);
 }
 
+/** Strip Hermes <think>/<tool_*> markup (literal or HTML-escaped) from chat body text. */
+function scrubHermesTags(text) {
+  if (!text) return '';
+  let s = String(text);
+  // Double-escaped then single-escaped then literal.
+  s = s.replace(/&amp;lt;(\/?)\s*(think|tool_call|tool_response)\s*&amp;gt;/gi, '');
+  s = s.replace(/&lt;(\/?)\s*(think|tool_call|tool_response)\s*&gt;/gi, '');
+  s = s.replace(/<\/?\s*(think|tool_call|tool_response)\s*>/gi, '');
+  return s.replace(/^\s+/, '');
+}
+
 function appendChat(role, text, extra) {
   const chat = $('chat');
   const div = document.createElement('div');
@@ -1251,12 +1262,12 @@ function appendChat(role, text, extra) {
   if (extra?.reasoning) {
     const r = document.createElement('span');
     r.className = 'reason';
-    r.textContent = extra.reasoning;
+    r.textContent = scrubHermesTags(extra.reasoning) || extra.reasoning;
     div.appendChild(r);
   }
   const body = document.createElement('span');
   body.className = 'body';
-  body.textContent = text;
+  body.textContent = role === 'assistant' ? scrubHermesTags(text) : text;
   div.appendChild(body);
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
@@ -1329,7 +1340,8 @@ async function sendChat() {
           reasonEl.hidden = false;
           reasonEl.textContent += ev.text || '';
         } else if (ev.type === 'token') {
-          body.textContent += ev.text || '';
+          // Re-scrub the whole body so partial escaped tags never linger mid-stream.
+          body.textContent = scrubHermesTags(body.textContent + (ev.text || ''));
         } else if (ev.type === 'tool_call') {
           const t = document.createElement('span');
           t.className = 'tool';

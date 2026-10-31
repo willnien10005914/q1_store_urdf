@@ -20,7 +20,8 @@ from . import research
 from .service import APIError
 
 MAX_TOOL_ROUNDS = 6
-HOLDBACK = 16  # characters kept back while streaming so tags are never split across events
+# Hold back enough chars for the longest escaped close tag: &amp;lt;/think&amp;gt; (23).
+HOLDBACK = 32
 TOOLS = [
     {"name": "web_search", "description": "Search the web (DuckDuckGo). Use for Isaac Lab / Isaac Sim docs, GitHub issues and release notes.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -107,7 +108,19 @@ EXAMPLE_API_HINT = re.compile(
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
 )
-TAG_RE = re.compile(r"<think>|</think>|<tool_call>|</tool_call>")
+TAG_RE = re.compile(
+    r"<think>|</think>|<tool_call>|</tool_call>|"
+    r"&lt;think&gt;|&lt;/think&gt;|&lt;tool_call&gt;|&lt;/tool_call&gt;|"
+    r"&amp;lt;think&amp;gt;|&amp;lt;/think&amp;gt;|"
+    r"&amp;lt;tool_call&amp;gt;|&amp;lt;/tool_call&amp;gt;",
+    re.I,
+)
+LEAKED_TAG_RE = re.compile(
+    r"</?(?:think|tool_call|tool_response)\s*>|"
+    r"&lt;/?\s*(?:think|tool_call|tool_response)\s*&gt;|"
+    r"&amp;lt;/?\s*(?:think|tool_call|tool_response)\s*&amp;gt;",
+    re.I,
+)
 
 
 def tokenize(text):
@@ -116,6 +129,37 @@ def tokenize(text):
     cjk = re.findall(r"[\u3400-\u9fff]", text)
     words.update("".join(pair) for pair in zip(cjk, cjk[1:]))
     return words
+
+
+def normalize_hermes_tags(text: str) -> str:
+    """Decode HTML-escaped Hermes control tags to literal XML so TagStreamer can split them."""
+    if not text:
+        return text
+    out = text
+    for a, b in (
+        ("&amp;lt;think&amp;gt;", "<think>"),
+        ("&amp;lt;/think&amp;gt;", "</think>"),
+        ("&amp;lt;tool_call&amp;gt;", "<tool_call>"),
+        ("&amp;lt;/tool_call&amp;gt;", "</tool_call>"),
+        ("&amp;lt;tool_response&amp;gt;", "<tool_response>"),
+        ("&amp;lt;/tool_response&amp;gt;", "</tool_response>"),
+        ("&lt;think&gt;", "<think>"),
+        ("&lt;/think&gt;", "</think>"),
+        ("&lt;tool_call&gt;", "<tool_call>"),
+        ("&lt;/tool_call&gt;", "</tool_call>"),
+        ("&lt;tool_response&gt;", "<tool_response>"),
+        ("&lt;/tool_response&gt;", "</tool_response>"),
+    ):
+        out = out.replace(a, b)
+    return out
+
+
+def strip_leaked_hermes_tags(text: str) -> str:
+    """Remove leftover think/tool markup from answer text."""
+    if not text:
+        return text
+    cleaned = LEAKED_TAG_RE.sub("", normalize_hermes_tags(text))
+    return re.sub(r"^\s+", "", cleaned)
 
 
 class TagStreamer:
@@ -130,7 +174,7 @@ class TagStreamer:
         self.tool_calls = []
 
     def feed(self, delta, final=False):
-        self.buffer += delta
+        self.buffer = normalize_hermes_tags(self.buffer + (delta or ""))
         events = []
         while True:
             match = TAG_RE.search(self.buffer)
@@ -138,14 +182,15 @@ class TagStreamer:
                 before, tag = self.buffer[:match.start()], match.group(0)
                 self.buffer = self.buffer[match.end():]
                 events += self._emit(before)
-                if tag == "<think>":
+                tag_l = normalize_hermes_tags(tag).lower()
+                if tag_l == "<think>":
                     self.mode = "think"
-                elif tag == "</think>":
+                elif tag_l == "</think>":
                     self.mode = "answer"
-                elif tag == "<tool_call>":
+                elif tag_l == "<tool_call>":
                     self.mode = "tool"
                     self.tool_buffer = ""
-                elif tag == "</tool_call>":
+                elif tag_l == "</tool_call>":
                     self.mode = "answer"
                     events.append(self._parse_tool())
                 continue
@@ -164,6 +209,9 @@ class TagStreamer:
             return [{"type": "reasoning", "text": text}]
         if self.mode == "tool":
             self.tool_buffer += text
+            return []
+        text = strip_leaked_hermes_tags(text)
+        if not text:
             return []
         self.answer += text
         return [{"type": "token", "text": text}]
@@ -244,7 +292,8 @@ class Agent:
             "Never answer a runtime Traceback with only「example.py 裡沒有這個字串」— that means you used /code instead of repairing. "
             "Never say you cannot analyze run results — use analyze_run. "
             "Never say「已加上 log／已改好」unless apply_code/propose_code succeeded; the Lab editor shows yellow Hermes marks and `# [Hermes]` notes.\n\n"
-            "Always start your reply with your reasoning inside <think></think>, then the answer. "
+            "Always start your reply with your reasoning inside literal <think></think> tags "
+            "(never HTML-escape them as &lt;think&gt; or &amp;lt;think&amp;gt;), then the answer. "
             "You have tools. To call one, emit exactly: <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call> and stop; the result arrives in a "
             "<tool_response> message, after which you continue. Never fabricate tool results. Use apply_code for learner-requested edits (加 log 等), "
             "propose_code for optional review diffs, set_params for slider changes, start_run to execute, analyze_run for post-run results, "
@@ -407,7 +456,11 @@ class Agent:
                 yield event
             yield {"type": "tool_result", "name": call["name"], "result": self.summarize(result)}
             msgs.append({"role": "tool", "content": f"<tool_response>{json.dumps(result, ensure_ascii=False)[:12000]}</tool_response>"})
-        saved = self.t.append_message(uid, lesson["id"], "assistant", final_answer.strip(), reasoning=all_reasoning.strip()[:6000], mode="hermes")
+        clean_answer = strip_leaked_hermes_tags(final_answer).strip()
+        saved = self.t.append_message(
+            uid, lesson["id"], "assistant", clean_answer,
+            reasoning=all_reasoning.strip()[:6000], mode="hermes",
+        )
         yield {"type": "done", "message_id": saved["id"], "mode": "hermes"}
 
     @staticmethod
