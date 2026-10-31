@@ -75,13 +75,13 @@ Q1_LEG_CFG = ArticulationCfg(
 
 ## 5. 範例
 
-右側 `example.py`：
+右側 `example.py`（預設 `physics=newton_mjwarp`，**不需要**完整 Isaac Sim）：
 
-1. 以 `UrdfConverterCfg` 轉換所選 Q1（參數 `fix_base`、`merge_fixed_joints`、`stiffness`、`damping`、`link_density`）。
-2. 生成 `Articulation`，輸出每個關節的 `type`、`lower/upper`（`joint_pos_limits.torch`）、`effort/velocity limit`、是否在 `control_joints` 內。
-3. 對照本站 `manifest.json` 的 `control_joints` 與 URDF SHA-256，列出缺少或多出的關節。
-4. 輸出總質量（body masses 加總）與 URDF inertial 總和比較。
+1. **kitless 路徑**：`NewtonCfg` + `sim_utils.UrdfFileCfg`（繼承 `UrdfConverterCfg`，spawn 時自動轉換並快取）。只需要 Lab 的 `--extra importers`。
+2. **PhysX / Kit 路徑**（選 `physics=isaacsim_physx`）：顯式呼叫 `UrdfConverter` → `UsdFileCfg`，才能看到 `usd_dir/{robot}/{robot}.usda` 輸出規則；此路徑需要完整 Isaac Sim。硬編碼 `PhysxCfg()` 而本機沒有 Kit 時，會出現 `Isaac Sim is not installed or not found on PYTHONPATH`。
+3. 生成 `Articulation`，輸出每個關節的 `type`、`lower/upper`（`joint_pos_limits.torch`）、`effort/velocity limit`、是否在 `control_joints` 內。
+4. 對照本站 `manifest.json` 的 `control_joints`，列出缺少或多出的關節，並比較 URDF inertial 總質量與 articulation 質量。
 
-練習：把 `merge_fixed_joints` 關掉，看 Leg 多出哪 6 個關節；再把 `stiffness` 設成 0，看 Articulation 生成後的 `joint_stiffness` 是否沿用 URDF 值。
+練習：把 `merge_fixed_joints` 關掉，看 Leg 多出哪 6 個關節；再把 `stiffness` 設成 0，看 Articulation 生成後的 `joint_stiffness` 是否沿用 URDF 值。有 Kit 時再切 `isaacsim_physx` 對照 `result.json` 的 `spawn_mode` / `usd_path`。
 
 > 本頁上方的 3D 預覽是 Three.js 幾何顯示（URDFLoader），不是 Isaac Sim 畫面；它用來確認關節名稱與軸向。

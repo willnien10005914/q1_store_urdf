@@ -11,6 +11,9 @@
   "robots": ["leg", "wheel"],
   "apis": ["isaaclab.sim.converters.UrdfConverterCfg", "UrdfConverterCfg.JointDriveCfg.PDGainsCfg", "sim_utils.UrdfFileCfg", "ArticulationCfg.InitialStateCfg", "robot.data.joint_pos_limits.torch", "scripts/tools/convert_urdf.py"],
   "params": [
+    {"key": "physics", "label": "物理 preset", "type": "select", "default": "newton_mjwarp",
+     "options": ["newton_mjwarp", "isaacsim_physx"],
+     "help": "newton_mjwarp：kitless，用 UrdfFileCfg（預設）。isaacsim_physx：顯式 UrdfConverter→USD，需要完整 Isaac Sim。"},
     {"key": "fix_base", "label": "固定 base", "type": "bool", "default": false, "help": "檢查關節時先固定 base 比較方便；訓練時要關掉。"},
     {"key": "merge_fixed_joints", "label": "合併 fixed joints", "type": "bool", "default": true,
      "help": "3.0 以 URDF XML 前處理實作；Q1 Leg 的 6 個鎖定關節會被合併進父 link。"},

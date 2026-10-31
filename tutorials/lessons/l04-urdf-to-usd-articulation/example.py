@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Lesson 04 — convert the Q1 URDF with the 3.0 URDF importer and inspect the resulting Articulation.
 
-    uv run --extra isaacsim python example.py --job-dir <dir> --params <dir>/params.json
+    uv run [--extra isaacsim] python example.py --job-dir <dir> --params <dir>/params.json
+
+Default physics=newton_mjwarp uses sim_utils.UrdfFileCfg (kitless; needs --extra importers only).
+physics=isaacsim_physx uses the explicit UrdfConverter → UsdFileCfg path (needs full Isaac Sim / Kit).
 
 Writes result.json with a per-joint table (type, limits, drive gains, in control_joints?) and a mass check.
-The USD import path requires Isaac Sim (importer 3.0 runs inside Kit), so pick a PhysX preset.
 """
 from __future__ import annotations
 
@@ -48,9 +50,18 @@ progress("starting", 0, 3, message=f"URDF has {len(urdf_joints)} joints, {urdf_m
 
 from isaaclab.app import launch_simulation  # noqa: E402
 from isaaclab.sim import SimulationCfg  # noqa: E402
-from isaaclab_physx.physics import PhysxCfg  # noqa: E402  (importer 3.0 runs inside Isaac Sim)
 
-sim_cfg = SimulationCfg(dt=1 / 200, device="cuda:0", physics=PhysxCfg())
+PHYSICS = P.get("physics", "newton_mjwarp")
+sim_cfg = SimulationCfg(dt=1 / 200, device="cuda:0")
+if PHYSICS == "isaacsim_physx":
+    from isaaclab_physx.physics import PhysxCfg  # requires full Isaac Sim / Kit
+    sim_cfg.physics = PhysxCfg()
+elif PHYSICS == "newton_mjwarp":
+    from isaaclab_newton.physics import NewtonCfg  # kitless; UrdfFileCfg + --extra importers
+    sim_cfg.physics = NewtonCfg()
+else:
+    raise SystemExit(f"this lesson supports newton_mjwarp and isaacsim_physx; got {PHYSICS!r}")
+
 with launch_simulation(sim_cfg):
     try:
         import lab3_compat
@@ -62,23 +73,40 @@ with launch_simulation(sim_cfg):
     from isaaclab.assets import Articulation, ArticulationCfg, AssetBaseCfg
     from isaaclab.actuators import ImplicitActuatorCfg
     from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
-    from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
     from isaaclab.utils import configclass
 
-    # ---- 1. explicit conversion (so the lesson shows the output path rule) ---------------------
     stiffness = float(P.get("stiffness", 80.0))
     damping = float(P.get("damping", 4.0))
-    gains = UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=stiffness if stiffness > 0 else None, damping=damping if damping > 0 else None)
-    converter_cfg = UrdfConverterCfg(
-        asset_path=P["urdf"], usd_dir=str(JOB / "usd"),  # output: usd/<robot_name>/<robot_name>.usda (automatic)
-        fix_base=bool(P.get("fix_base", False)), merge_fixed_joints=bool(P.get("merge_fixed_joints", True)),
-        link_density=float(P.get("link_density", 0.0)),
-        joint_drive=UrdfConverterCfg.JointDriveCfg(gains=gains),
-    )
-    usd_path = UrdfConverter(converter_cfg).usd_path
-    progress("converting", 1, 3, message=f"usd: {usd_path}")
+    fix_base = bool(P.get("fix_base", False))
+    merge_fixed = bool(P.get("merge_fixed_joints", True))
+    link_density = float(P.get("link_density", 0.0))
+    gains = sim_utils.UrdfFileCfg.JointDriveCfg.PDGainsCfg(
+        stiffness=stiffness if stiffness > 0 else None, damping=damping if damping > 0 else None)
 
-    # ---- 2. spawn the converted USD as an Articulation --------------------------------------
+    # ---- 1. spawn source: explicit converter (PhysX/Kit) or UrdfFileCfg (kitless) ------------
+    usd_path = None
+    if PHYSICS == "isaacsim_physx":
+        from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
+        converter_cfg = UrdfConverterCfg(
+            asset_path=P["urdf"], usd_dir=str(JOB / "usd"),
+            fix_base=fix_base, merge_fixed_joints=merge_fixed, link_density=link_density,
+            joint_drive=UrdfConverterCfg.JointDriveCfg(
+                gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
+                    stiffness=stiffness if stiffness > 0 else None, damping=damping if damping > 0 else None)),
+        )
+        usd_path = UrdfConverter(converter_cfg).usd_path
+        spawn = sim_utils.UsdFileCfg(usd_path=usd_path)
+        spawn_mode = "UrdfConverter"
+        progress("converting", 1, 3, message=f"usd: {usd_path}")
+    else:
+        # UrdfFileCfg inherits UrdfConverterCfg — Lab does the convert+cache when the Articulation spawns.
+        spawn = sim_utils.UrdfFileCfg(
+            asset_path=P["urdf"], fix_base=fix_base, merge_fixed_joints=merge_fixed, link_density=link_density,
+            joint_drive=sim_utils.UrdfFileCfg.JointDriveCfg(gains=gains))
+        spawn_mode = "UrdfFileCfg"
+        progress("converting", 1, 3, message=f"spawn via {spawn_mode} (kitless)")
+
+    # ---- 2. spawn as an Articulation and inspect --------------------------------------------
     sim = sim_utils.SimulationContext(sim_cfg)
     expr = [name for name in control] or [".*"]
 
@@ -87,7 +115,7 @@ with launch_simulation(sim_cfg):
         ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
         light = AssetBaseCfg(prim_path="/World/light", spawn=sim_utils.DomeLightCfg(intensity=2500.0))
         robot = ArticulationCfg(
-            prim_path="{ENV_REGEX_NS}/Robot", spawn=sim_utils.UsdFileCfg(usd_path=usd_path),
+            prim_path="{ENV_REGEX_NS}/Robot", spawn=spawn,
             init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 1.0), rot=(0.0, 0.0, 0.0, 1.0), joint_pos=P.get("default_joint_positions", {})),
             # Only the 23 control joints become actuator channels; mimic followers stay passive.
             actuators={"control": ImplicitActuatorCfg(joint_names_expr=expr, stiffness=stiffness, damping=damping,
@@ -112,7 +140,8 @@ with launch_simulation(sim_cfg):
                      "stiffness": round(float(stiff[index]), 2), "damping": round(float(damp[index]), 2),
                      "in_control_joints": name in control})
     imported = set(robot.joint_names)
-    result = {"robot": P["robot"], "usd_path": str(usd_path), "fix_base": converter_cfg.fix_base, "merge_fixed_joints": converter_cfg.merge_fixed_joints,
+    result = {"robot": P["robot"], "physics": PHYSICS, "spawn_mode": spawn_mode, "usd_path": str(usd_path) if usd_path else None,
+              "fix_base": fix_base, "merge_fixed_joints": merge_fixed,
               "num_joints": robot.num_joints, "num_bodies": robot.num_bodies,
               "control_joints_missing": [name for name in control if name not in imported],
               "imported_not_in_control": sorted(imported - set(control)),
@@ -122,5 +151,5 @@ with launch_simulation(sim_cfg):
               "joints": rows}
     (JOB / "result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
     progress("complete", 3, 3, num_joints=robot.num_joints, missing=len(result["control_joints_missing"]))
-    print(f"[lesson04] {robot.num_joints} joints imported; missing control joints: {result['control_joints_missing']}")
+    print(f"[lesson04] {robot.num_joints} joints via {spawn_mode}/{PHYSICS}; missing control joints: {result['control_joints_missing']}")
     print(f"[lesson04] URDF mass {urdf_mass:.2f} kg vs articulation {result['articulation_mass_kg']} kg")

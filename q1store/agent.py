@@ -92,10 +92,18 @@ LOG_EDIT_HINT = re.compile(
 )
 FENCED_PY_RE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.I | re.S)
 PHYSX_HINT = re.compile(r"physxjointapi|physxschema|add_joint_schemas|cannot find a valid schema", re.I)
+# PhysX/Kit launch without full Isaac Sim — fix by rewriting example.py to newton_mjwarp, not by installing extras.
+ISAAC_SIM_MISSING_HINT = re.compile(
+    r"Isaac Sim is not installed|not found on PYTHONPATH|"
+    r"PhysX backend and Kit visualizer currently requires Isaac Sim|"
+    r"requires Isaac Sim and Omniverse Kit",
+    re.I,
+)
 EXAMPLE_API_HINT = re.compile(
     r"unexpected keyword argument|TypeError:|AttributeError:|got an unexpected keyword|"
     r"NewtonCfg\.__init__|PhysxCfg\.__init__|has no attribute|"
-    r"File \"example\.py\"",
+    r"File \"example\.py\"|"
+    r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
 )
 TAG_RE = re.compile(r"<think>|</think>|<tool_call>|</tool_call>")
@@ -219,13 +227,16 @@ class Agent:
             "1) call read_run_log (or use the Latest run block below), 2) if the error mentions CUDA/driver/torch call diagnose_runtime, "
             "3) if diagnose reports torch/driver mismatch call repair_isaaclab_cuda, "
             "4) if the error mentions PhysxJointAPI / PhysxSchema / ApplyAPI call repair_physx_joint (kitless URDF; NOT an example.py string search), "
-            "5) if No module named 'isaacsim' call repair_isaaclab_importers, "
-            "6) if TypeError/unexpected keyword/AttributeError points at example.py (e.g. NewtonCfg(solver_iterations=…)): "
+            "5) if No module named 'isaacsim' (import only) call repair_isaaclab_importers, "
+            "6) if 'Isaac Sim is not installed' / PhysX backend requires Kit AND example.py hardcodes PhysxCfg/UrdfConverter: "
+            "call apply_code with newton_mjwarp + UrdfFileCfg (kitless) — do NOT tell them to install full Isaac Sim as the only fix; "
+            "this store defaults to kitless Newton. "
+            "7) if TypeError/unexpected keyword/AttributeError points at example.py (e.g. NewtonCfg(solver_iterations=…)): "
             "call apply_code with a corrected FULL example.py — Lab 3 uses NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=N)). "
             "Also give a short Cursor prompt if the store lesson file itself is wrong. "
-            "7) for other example.py bugs or when the learner asks to 加 log / 改程式: call apply_code "
+            "8) for other example.py bugs or when the learner asks to 加 log / 改程式: call apply_code "
             "with the FULL updated example.py — never claim you edited the file without that tool. "
-            "8) then start_run to verify. "
+            "9) then start_run to verify. "
             "When the learner asks about 結果/影片/rollout/推論/metrics after a run: call analyze_run, summarize metrics honestly, "
             "and tell them the Lab panel plays result.mp4 (if present) or the Three.js rollout player. "
             "Do NOT ask which lesson — you already know it from context. Never reply that you cannot understand a fix request. "
@@ -1053,16 +1064,28 @@ class OfflineTutor:
 
         err_blob = f"{log_info.get('error') or ''} {log_info.get('log_tail') or ''}"
         err_l = err_blob.lower()
+        current_code = context.get("code") or lesson.get("draft_code") or lesson.get("code", "") or ""
         needs_cuda = any(k in err_l for k in ("cuda", "driver", "12080", "cu130")) or any("torch" in i.lower() or "cuda" in i.lower() for i in issues)
+        isaac_sim_missing = bool(ISAAC_SIM_MISSING_HINT.search(err_blob)) or bool(ISAAC_SIM_MISSING_HINT.search(message or ""))
+        hardcodes_physx = bool(re.search(r"physics\s*=\s*PhysxCfg\s*\(|from isaaclab_physx\.physics import PhysxCfg", current_code))
+        # Kit-missing PhysX launch is an example.py preset bug when this store runs kitless — not an importers install.
+        needs_kitless_rewrite = isaac_sim_missing and (hardcodes_physx or "UrdfConverter" in current_code or (lesson.get("id") or "").startswith("l04"))
         needs_importers = (
-            "no module named 'isaacsim'" in err_l
-            or "urdf importer" in " ".join(issues).lower()
-            or not ((diag.get("urdf_importer") or {}).get("ok", True))
+            not needs_kitless_rewrite
+            and (
+                "no module named 'isaacsim'" in err_l
+                or "urdf importer" in " ".join(issues).lower()
+                or not ((diag.get("urdf_importer") or {}).get("ok", True))
+            )
         )
         needs_physx = bool(PHYSX_HINT.search(err_blob)) or bool(PHYSX_HINT.search(message or ""))
-        needs_example_api = bool(EXAMPLE_API_HINT.search(err_blob)) or bool(EXAMPLE_API_HINT.search(message or ""))
+        needs_example_api = (
+            bool(EXAMPLE_API_HINT.search(err_blob))
+            or bool(EXAMPLE_API_HINT.search(message or ""))
+            or needs_kitless_rewrite
+        )
         # Don't treat incidental "cuda:0" in example.py Tracebacks as a driver mismatch.
-        if needs_example_api and re.search(r"unexpected keyword argument|TypeError:", err_blob, re.I):
+        if needs_example_api and re.search(r"unexpected keyword argument|TypeError:|Isaac Sim is not installed", err_blob, re.I):
             needs_cuda = needs_cuda and bool(re.search(
                 r"driver|12080|cu130|cuda.*(error|fail|mismatch|unavailable)|torch\.(cuda|version)",
                 err_blob, re.I,
@@ -1072,8 +1095,11 @@ class OfflineTutor:
         if do_repair and needs_example_api:
             reasoning.append("偵測到 example.py API／參數錯誤，自動套用修正到 Lab 編輯器")
             yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
-            current = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
-            fixed, note = fix_known_example_api_errors(current, err_blob, lesson_id=lesson.get("id") or "")
+            current = current_code
+            fixed, note = fix_known_example_api_errors(
+                current, err_blob, lesson_id=lesson.get("id") or "",
+                canonical_code=lesson.get("code") or "",
+            )
             if fixed and fixed != current:
                 yield {"type": "tool_call", "name": "apply_code", "arguments": {"explanation": note}}
                 applied, events = self.agent.run_tool(
@@ -1200,13 +1226,54 @@ class OfflineTutor:
         return "\n".join(lines)
 
 
-def fix_known_example_api_errors(code: str, err_text: str, lesson_id: str = "") -> tuple[str, str]:
+def fix_known_example_api_errors(
+    code: str, err_text: str, lesson_id: str = "", canonical_code: str = "",
+) -> tuple[str, str]:
     """Rewrite known Lab-3 API mismatches in example.py. Returns (code, note)."""
     if not code:
         return code, ""
     text = code
     notes: list[str] = []
     err = err_text or ""
+
+    # Hardcoded PhysxCfg / UrdfConverter without Kit → ship kitless Newton + UrdfFileCfg lesson file.
+    if ISAAC_SIM_MISSING_HINT.search(err) and (
+        re.search(r"physics\s*=\s*PhysxCfg\s*\(", text)
+        or "UrdfConverter" in text
+        or (lesson_id or "").startswith("l04")
+    ):
+        canon = (canonical_code or "").strip()
+        if canon and "NewtonCfg" in canon and "UrdfFileCfg" in canon and canon != text.strip():
+            notes.append(
+                "PhysxCfg/UrdfConverter（需完整 Isaac Sim）→ 課程預設 newton_mjwarp + UrdfFileCfg（kitless）"
+            )
+            note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
+            stamped = _stamp_hermes_note(canon if canon.endswith("\n") else canon + "\n", note)
+            return stamped, note
+        # Fallback: swap the launch block only.
+        if re.search(r"physics\s*=\s*PhysxCfg\s*\(", text):
+            text2 = re.sub(
+                r"from isaaclab_physx\.physics import PhysxCfg[^\n]*\n+",
+                "",
+                text,
+                count=1,
+            )
+            text2 = re.sub(
+                r"sim_cfg\s*=\s*SimulationCfg\([^)]*physics\s*=\s*PhysxCfg\(\)[^)]*\)",
+                'sim_cfg = SimulationCfg(dt=1 / 200, device="cuda:0")\n'
+                'PHYSICS = P.get("physics", "newton_mjwarp")\n'
+                'if PHYSICS == "isaacsim_physx":\n'
+                "    from isaaclab_physx.physics import PhysxCfg\n"
+                "    sim_cfg.physics = PhysxCfg()\n"
+                "else:\n"
+                "    from isaaclab_newton.physics import NewtonCfg\n"
+                "    sim_cfg.physics = NewtonCfg()",
+                text2,
+                count=1,
+            )
+            if text2 != text:
+                text = text2
+                notes.append("PhysxCfg() 硬編碼 → physics preset（預設 newton_mjwarp）")
 
     # NewtonCfg(solver_iterations=N) is invalid in Lab 3 — iterations live on MJWarpSolverCfg.
     if (
@@ -1239,13 +1306,45 @@ def fix_known_example_api_errors(code: str, err_text: str, lesson_id: str = "") 
     if text == code:
         return code, ""
     note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
-    return text, note
+    return _stamp_hermes_note(text, note), note
+
+
+def _stamp_hermes_note(code: str, note: str) -> str:
+    """Insert a # [Hermes] attribution near the top of example.py (after shebang/docstring)."""
+    if not code or not note:
+        return code
+    marker = f"# [Hermes] {note}"
+    if marker in code or "# [Hermes] Hermes 修正" in code:
+        return code if code.endswith("\n") else code + "\n"
+    lines = code.splitlines(True)
+    insert_at = 0
+    if lines and lines[0].startswith("#!"):
+        insert_at = 1
+    if insert_at < len(lines) and lines[insert_at].lstrip().startswith('"""'):
+        # Skip module docstring.
+        if lines[insert_at].count('"""') >= 2 and lines[insert_at].strip() != '"""':
+            insert_at += 1
+        else:
+            insert_at += 1
+            while insert_at < len(lines) and '"""' not in lines[insert_at]:
+                insert_at += 1
+            if insert_at < len(lines):
+                insert_at += 1
+    lines.insert(insert_at, marker + "\n")
+    out = "".join(lines)
+    return out if out.endswith("\n") else out + "\n"
 
 
 def cursor_prompt_for_example_api_fix(lesson: dict, err_text: str, note: str) -> str:
     lid = (lesson or {}).get("id") or "lesson"
     title = (lesson or {}).get("title") or lid
     err_snip = re.sub(r"\s+", " ", (err_text or "").strip())[:500]
+    extra = ""
+    if ISAAC_SIM_MISSING_HINT.search(err_text or ""):
+        extra = (
+            " Prefer physics=newton_mjwarp with sim_utils.UrdfFileCfg (kitless). "
+            "Only use UrdfConverter + PhysxCfg when physics=isaacsim_physx and full Isaac Sim is installed. "
+        )
     return (
         f"In q1_store_urdf, fix Isaac Lab 3 tutorial lesson `{lid}` ({title}).\n"
         f"Runtime error from example.py:\n{err_snip}\n\n"
@@ -1254,7 +1353,9 @@ def cursor_prompt_for_example_api_fix(lesson: dict, err_text: str, note: str) ->
         "snippet matches the installed Isaac Lab 3 checkout under Q1_ISAACLAB3_ROOT. "
         "For Newton MJWarp, use NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=N)) — not "
         "NewtonCfg(solver_iterations=N). Keep the tutorial param key solver_iterations as the UI slider "
-        "that maps into MJWarpSolverCfg.iterations. After editing, restart the store "
+        "that maps into MJWarpSolverCfg.iterations."
+        + extra
+        + " After editing, restart the store "
         "(bash scripts/restart_store.sh --port 8878) and re-run the lesson."
     )
 

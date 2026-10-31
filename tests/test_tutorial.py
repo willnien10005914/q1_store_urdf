@@ -13,7 +13,8 @@ from unittest import mock
 
 from q1store.agent import (
     Agent, OfflineTutor, TagStreamer, inject_progress_logging, EDIT_HINT, REPAIR_HINT,
-    EXAMPLE_API_HINT, apply_simple_code_intent, extract_fenced_python, fix_known_example_api_errors,
+    EXAMPLE_API_HINT, ISAAC_SIM_MISSING_HINT, apply_simple_code_intent, extract_fenced_python,
+    fix_known_example_api_errors,
 )
 from q1store.llm import LLMManager, MODELS
 from q1store.service import Store
@@ -298,6 +299,60 @@ class AgentTests(unittest.TestCase):
         tokens = "".join(e.get("text", "") for e in events if e.get("type") == "token")
         self.assertIn("example.py API", tokens)
         self.assertIn("q1_store_urdf", tokens)
+        self.assertNotIn("請貼出關鍵行", tokens)
+
+    def test_fix_l04_isaac_sim_missing_applies_kitless(self):
+        err = (
+            "[ERROR] Isaac Sim is not installed or not found on PYTHONPATH.\n"
+            "  PhysX backend and Kit visualizer currently requires Isaac Sim.\n"
+        )
+        self.assertTrue(ISAAC_SIM_MISSING_HINT.search(err))
+        self.assertTrue(EXAMPLE_API_HINT.search(err))
+        broken = (
+            "from isaaclab.app import launch_simulation\n"
+            "from isaaclab.sim import SimulationCfg\n"
+            "from isaaclab_physx.physics import PhysxCfg\n"
+            "sim_cfg = SimulationCfg(dt=1 / 200, device=\"cuda:0\", physics=PhysxCfg())\n"
+            "with launch_simulation(sim_cfg):\n"
+            "    from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg\n"
+            "    usd_path = UrdfConverter(UrdfConverterCfg(asset_path=P['urdf'])).usd_path\n"
+        )
+        canon = (ROOT / "tutorials/lessons/l04-urdf-to-usd-articulation/example.py").read_text()
+        fixed, note = fix_known_example_api_errors(
+            broken, err, "l04-urdf-to-usd-articulation", canonical_code=canon,
+        )
+        self.assertIn("NewtonCfg", fixed)
+        self.assertIn("UrdfFileCfg", fixed)
+        self.assertIn("newton_mjwarp", fixed)
+        self.assertIn("[Hermes]", fixed)
+        self.assertIn("kitless", note.lower() + fixed.lower())
+        lesson = self.t.lesson("l04-urdf-to-usd-articulation", robot="leg", user_id=self.uid)
+        import uuid
+        run_id = uuid.uuid4().hex
+        directory = self.t.run_dir(run_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "run.log").write_text(err, encoding="utf-8")
+        run = {
+            "id": run_id, "user_id": self.uid, "lesson_id": lesson["id"], "lesson_title": "l04",
+            "robot": "leg", "params": {}, "code_sha256": "0" * 64, "code_modified": True,
+            "runtime": {"mode": "isaaclab3", "label": "Isaac Lab 3"}, "trainable": False, "resumable": False,
+            "state": "failed", "phase": None, "progress": None, "result": None,
+            "error": "exit code 1; 見 run.log", "pid": None,
+            "created_at": "2026-10-31T00:00:00Z", "started_at": "2026-10-31T00:00:00Z",
+            "finished_at": "2026-10-31T00:00:01Z", "resumed": 0,
+        }
+        self.t.put("runs", run, k1=self.uid, k2=lesson["id"])
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "請修復執行錯誤",
+            {"robot": "leg", "params": {}, "code": broken, "last_run": {
+                "id": run_id, "state": "failed", "error": "exit code 1; 見 run.log", "log_tail": err,
+            }},
+        ))
+        apply = next(e for e in events if e.get("type") == "code_apply")
+        self.assertIn("NewtonCfg", apply.get("code") or "")
+        self.assertIn("UrdfFileCfg", apply.get("code") or "")
+        tokens = "".join(e.get("text", "") for e in events if e.get("type") == "token")
+        self.assertIn("example.py API", tokens)
         self.assertNotIn("請貼出關鍵行", tokens)
 
     def test_any_coding_edit_applies_not_only_log(self):
