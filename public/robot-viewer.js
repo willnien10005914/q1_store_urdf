@@ -29,6 +29,15 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
   const grid=new THREE.GridHelper(12,60,0xe0e4ea,0xe9ecf1);grid.rotation.x=Math.PI/2;grid.position.z=-.05;scene.add(grid);
   const landmarkGroup=new THREE.Group();scene.add(landmarkGroup);
   let robot=null,manifest=null,disposed=false,frame=0,last=0,playing=false,motion='stand',time=0,loadToken=0,visible=false,hasSize=false,renderingPaused=false;
+  let explodeAmount=0,explodeAnim=null,modelMaterial=null,accessoriesGroup=null;
+  const linkBase=new Map(); // link name -> {x,y,z} local rest pose for explode offsets
+  const SKINS={
+    steel:{color:0x8492a4,roughness:.56,metalness:.25},
+    carbon:{color:0x1f2933,roughness:.35,metalness:.55},
+    gold:{color:0xc9a227,roughness:.4,metalness:.7},
+    matte_black:{color:0x111827,roughness:.9,metalness:.05},
+    signal_orange:{color:0xe8590c,roughness:.55,metalness:.15},
+  };
   const bounds=new THREE.Box3(),target=new THREE.Vector3(0,0,.75);
   const material=new THREE.MeshStandardMaterial({color:0xcbd2df,roughness:.8,metalness:.1,transparent:true,opacity:.33});
   function landmarkBox(x,y,z,w,d,h){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,d,h),material);mesh.position.set(x,y,z+h/2);landmarkGroup.add(mesh);}
@@ -131,12 +140,15 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       if(disposed||token!==loadToken){disposeModel(loaded);return api;}
       if(robot){scene.remove(robot);disposeModel(robot);}robot=loaded;scene.add(robot);
       const oldMaterials=new Set();
-      const modelMaterial=new THREE.MeshStandardMaterial({color:0x8492a4,roughness:.56,metalness:.25});
+      modelMaterial=new THREE.MeshStandardMaterial({color:0x8492a4,roughness:.56,metalness:.25});
       robot.traverse(o=>{if(o.isMesh){for(const m of(Array.isArray(o.material)?o.material:[o.material]))if(m)oldMaterials.add(m);o.material=modelMaterial;o.castShadow=false;o.receiveShadow=false;}});
       oldMaterials.forEach(m=>m.dispose());
+      captureLinkBases();
+      clearAccessories();
       setJoints(demoPose(0));robot.updateMatrixWorld(true);bounds.setFromObject(robot);
       if(bounds.isEmpty()||!Number.isFinite(bounds.min.z)||!Number.isFinite(bounds.max.z))throw new Error(tr('原生模型的 mesh 或姿態範圍無效。','Native model mesh or pose bounds are invalid.'));
       robot.position.z-=bounds.min.z;
+      applyExplode(explodeAmount);
       fit();const remain=Math.max(0,450-(performance.now()-shownAt));if(remain)await new Promise(resolve=>setTimeout(resolve,remain));if(disposed||token!==loadToken)return api;container.querySelectorAll('.loading-model').forEach(element=>element.remove());renderer.render(scene,camera);container.dataset.modelReady='true';container.dataset.robotType=entry.id;container.dataset.meshCount=String(meshLoads.length);onStatus(`${entry.name||entry.label||entry.id} · ${tr('原生 URDF 幾何預覽','native URDF geometry preview')}`);return api;
     }catch(error){if(loaded){scene.remove(loaded);disposeModel(loaded);if(loaded===robot)robot=null;}onStatus(tr('模型載入失敗：','Model load failed: ')+error.message);throw error;}
   }
@@ -146,6 +158,13 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
     if(now-last<1000/30)return;
     const delta=last?Math.min((now-last)/1000,.1):0;last=now;
     if(playing&&robot){time+=delta;setJoints(demoPose(time));}
+    if(explodeAnim&&robot){
+      explodeAnim.elapsed+=delta;
+      const u=Math.min(1,explodeAnim.elapsed/Math.max(0.05,explodeAnim.duration));
+      const eased=0.5-0.5*Math.cos(Math.PI*u);
+      applyExplode(explodeAnim.from+(explodeAnim.to-explodeAnim.from)*eased);
+      if(u>=1){explodeAnim=null;onStatus(tr('爆炸圖就緒','Explode view ready'));}
+    }
     controls.update();renderer.render(scene,camera);
   }
   /** Movable, non-mimic joints with their URDF limits and current angle, in URDF order. */
@@ -158,8 +177,127 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       return {name:j.name,type:j.jointType,lower,upper,value:Number.isFinite(value)?value:0};
     });
   }
+  function captureLinkBases(){
+    linkBase.clear();
+    if(!robot?.links)return;
+    for(const [name,link] of Object.entries(robot.links)){
+      linkBase.set(name,{x:link.position.x,y:link.position.y,z:link.position.z});
+    }
+  }
+  function applyExplode(amount=0){
+    explodeAmount=Math.max(0,Math.min(1,Number(amount)||0));
+    if(!robot?.links||!linkBase.size)return api;
+    robot.updateMatrixWorld(true);
+    const root=robot.links.center_hip_link||robot.links.center_torso_link||Object.values(robot.links)[0];
+    const rootWorld=new THREE.Vector3();
+    root?.getWorldPosition(rootWorld);
+    const tmp=new THREE.Vector3();
+    for(const [name,link] of Object.entries(robot.links)){
+      const base=linkBase.get(name);if(!base)continue;
+      link.getWorldPosition(tmp);
+      const dir=tmp.clone().sub(rootWorld);
+      if(dir.lengthSq()<1e-8)dir.set(0,0,0.15);
+      else dir.normalize();
+      // Push parts outward in local parent space approximately via world delta projected.
+      const push=dir.multiplyScalar(explodeAmount*0.55);
+      link.position.set(base.x+push.x,base.y+push.y,base.z+push.z);
+    }
+    return api;
+  }
+  function animateExplode(to=0.85,{duration=1.2,from=explodeAmount}={}){
+    explodeAnim={from:Number(from)||0,to:Math.max(0,Math.min(1,Number(to)||0)),elapsed:0,duration:Math.max(0.2,Number(duration)||1.2)};
+    onStatus(tr('播放爆炸圖…','Playing explode…'));
+    return api;
+  }
+  function setSkin(name='steel'){
+    const skin=SKINS[name]||SKINS.steel;
+    if(!modelMaterial)modelMaterial=new THREE.MeshStandardMaterial();
+    modelMaterial.color.setHex(skin.color);
+    modelMaterial.roughness=skin.roughness;
+    modelMaterial.metalness=skin.metalness;
+    modelMaterial.needsUpdate=true;
+    if(robot)robot.traverse(o=>{if(o.isMesh&&o.material===modelMaterial){/* shared */}});
+    return api;
+  }
+  function clearAccessories(){
+    if(!accessoriesGroup)return;
+    accessoriesGroup.traverse(o=>{o.geometry?.dispose();if(o.material&&!Array.isArray(o.material))o.material.dispose();});
+    accessoriesGroup.parent?.remove(accessoriesGroup);
+    accessoriesGroup=null;
+  }
+  function parentLink(preferred='center_torso_link'){
+    if(!robot?.links)return null;
+    return robot.links[preferred]||robot.links.center_waist_pitch_link||robot.links.center_hip_link||Object.values(robot.links)[0]||null;
+  }
+  function setAccessories(cfg={}){
+    if(!robot)return api;
+    clearAccessories();
+    accessoriesGroup=new THREE.Group();
+    accessoriesGroup.name='q1-hardware-accessories';
+    const parent=parentLink(cfg.parentLink||'center_torso_link');
+    if(!parent)return api;
+    parent.add(accessoriesGroup);
+    if(cfg.tof?.enabled!==false&&cfg.tof){
+      const s=Math.max(0.01,Number(cfg.tof.size)||0.04);
+      const mat=new THREE.MeshStandardMaterial({color:0x22b8cf,roughness:.4,metalness:.35,emissive:0x0b7285,emissiveIntensity:.25});
+      const body=new THREE.Mesh(new THREE.BoxGeometry(s,s*0.6,s*0.35),mat);
+      const lens=new THREE.Mesh(new THREE.CylinderGeometry(s*0.18,s*0.18,s*0.2,16),new THREE.MeshStandardMaterial({color:0x111827,metalness:.8,roughness:.2}));
+      lens.rotation.x=Math.PI/2;lens.position.z=s*0.22;
+      const tof=new THREE.Group();tof.name='tof';tof.add(body,lens);
+      tof.position.set(Number(cfg.tof.x)||0,Number(cfg.tof.y)||0,Number(cfg.tof.z)||0);
+      accessoriesGroup.add(tof);
+    }
+    if(cfg.audio?.enabled!==false&&cfg.audio){
+      const s=Math.max(0.01,Number(cfg.audio.size)||0.035);
+      const mat=new THREE.MeshStandardMaterial({color:0xf59f00,roughness:.45,metalness:.2});
+      const grille=new THREE.Mesh(new THREE.CylinderGeometry(s*0.45,s*0.45,s*0.25,24),mat);
+      grille.rotation.x=Math.PI/2;
+      const mic=new THREE.Mesh(new THREE.SphereGeometry(s*0.22,12,12),new THREE.MeshStandardMaterial({color:0xffec99,metalness:.1,roughness:.6}));
+      mic.position.set(s*0.55,0,0);
+      const audio=new THREE.Group();audio.name='audio';audio.add(grille,mic);
+      audio.position.set(Number(cfg.audio.x)||0,Number(cfg.audio.y)||0,Number(cfg.audio.z)||0);
+      accessoriesGroup.add(audio);
+    }
+    onStatus(tr('已更新感測器／音訊外形','Accessories regenerated'));
+    return api;
+  }
+  function setCameraPreset(name='three_quarter'){
+    if(!robot){fit();return api;}
+    robot.updateMatrixWorld(true);bounds.setFromObject(robot);
+    const center=bounds.getCenter(new THREE.Vector3());
+    const size=bounds.getSize(new THREE.Vector3());
+    const height=Math.max(.5,size.z);
+    const distance=Math.max(height,size.x/Math.max(.5,camera.aspect))/(2*Math.tan(camera.fov*Math.PI/360)*.77);
+    const dirs={
+      three_quarter:new THREE.Vector3(1,-1.7,.48),
+      front:new THREE.Vector3(0,-1,.15),
+      side:new THREE.Vector3(1,0,.12),
+      top:new THREE.Vector3(.15,-.15,1),
+      detail_torso:new THREE.Vector3(.55,-.9,.35),
+    };
+    const direction=(dirs[name]||dirs.three_quarter).clone().normalize();
+    const dist=name==='detail_torso'?distance*0.55:distance;
+    controls.target.copy(center);
+    if(name==='detail_torso')controls.target.z=center.z+size.z*0.15;
+    camera.position.copy(direction.multiplyScalar(dist).add(controls.target.clone()));
+    controls.update();
+    return api;
+  }
+  function regenerateAppearance(cfg={}){
+    if(cfg.skin)setSkin(cfg.skin);
+    setAccessories({
+      tof:cfg.tof,
+      audio:cfg.audio,
+      parentLink:cfg.parentLink||'center_torso_link',
+    });
+    if(cfg.camera)setCameraPreset(cfg.camera);
+    if(Number.isFinite(cfg.explode))applyExplode(cfg.explode);
+    onStatus(tr('已重新生成機器人外形','Robot appearance regenerated'));
+    return api;
+  }
   const api={loadRobot,setJoints,getJointStates,setRenderingPaused(value){renderingPaused=!!value;last=0;return api;},setMotion(name,t){motion=name;if(Number.isFinite(t))time=t;if(robot)setJoints(demoPose(time));return api;},setPlaying(value){playing=!!value;return api;},setLandmark,
+    setExplode:applyExplode,animateExplode,setSkin,setAccessories,setCameraPreset,regenerateAppearance,getExplode(){return explodeAmount;},
     getRobot(){return robot;},capture(){renderer.render(scene,camera);return renderer.domElement.toDataURL('image/png');},
-    dispose(){if(disposed)return;disposed=true;loadToken++;cancelAnimationFrame(frame);observer.disconnect();visibilityObserver.disconnect();controls.dispose();disposeModel(robot);scene.traverse(o=>{o.geometry?.dispose();if(o.material&&!Array.isArray(o.material))o.material.dispose();});renderer.dispose();renderer.domElement.remove();}};
+    dispose(){if(disposed)return;disposed=true;loadToken++;explodeAnim=null;cancelAnimationFrame(frame);observer.disconnect();visibilityObserver.disconnect();controls.dispose();clearAccessories();disposeModel(robot);scene.traverse(o=>{o.geometry?.dispose();if(o.material&&!Array.isArray(o.material))o.material.dispose();});renderer.dispose();renderer.domElement.remove();}};
   frame=requestAnimationFrame(animate);return api;
 }

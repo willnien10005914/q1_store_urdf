@@ -41,10 +41,12 @@ class TutorialUnitTests(unittest.TestCase):
     def test_catalog_has_eight_lessons_and_categories(self):
         cat = self.t.catalog()
         ids = [m["id"] for m in self.t.lessons()]
-        self.assertEqual(len(ids), 8)
+        self.assertEqual(len(ids), 9)
         self.assertTrue(all(i.startswith("l0") for i in ids))
-        self.assertEqual(cat["lesson_count"], 8)
-        self.assertGreaterEqual(len(cat["categories"]), 8)
+        self.assertEqual(cat["lesson_count"], 9)
+        self.assertGreaterEqual(len(cat["categories"]), 9)
+        self.assertIn("l09-hardware-explode-and-actuators", ids)
+        self.assertIn("hardware", {c["id"] for c in cat["categories"]})
         self.assertIn("novice", {l["id"] for l in cat["levels"]})
 
     def test_register_same_name_reuses_progress(self):
@@ -154,6 +156,30 @@ class TutorialUnitTests(unittest.TestCase):
             self.skipTest("matplotlib/ffmpeg unavailable for preview")
         self.assertIn(out, ("result.mp4", "result.gif"))
         self.assertTrue((directory / out).is_file())
+
+    def test_l09_hardware_fallback_writes_explode_artifacts(self):
+        uid = self.t.register_user("HwDana")["user"]["id"]
+        self.t.isaaclab3_root = None
+        run = self.t.create_run(
+            uid, "l09-hardware-explode-and-actuators", "leg",
+            {"sim_seconds": 1, "fps": 20, "tof_mass": 0.2, "audio_mass": 0.1, "explode_amount": 0.9, "skin": "carbon"},
+        )
+        for _ in range(80):
+            run = self.t.run(run["id"])
+            if run["state"] in ("complete", "failed", "blocked"):
+                break
+            time.sleep(0.25)
+        self.assertEqual(run["state"], "complete", run.get("error"))
+        directory = self.t.run_dir(run["id"])
+        hardware = json.loads((directory / "hardware.json").read_text())
+        self.assertEqual(hardware["skin"], "carbon")
+        self.assertGreater(hardware["mass_scale"], 1.0)
+        self.assertEqual(hardware["actuators"]["type"], "ImplicitActuatorCfg")
+        rollout = json.loads((directory / "rollout.json").read_text())
+        self.assertEqual(rollout.get("kind"), "hardware_explode")
+        self.assertGreater(len(rollout["frames"]), 5)
+        self.assertIn("explode", rollout["frames"][-1])
+        self.assertIn("hardware.json", run["files"])
 
     def test_isaac_lesson_blocks_without_checkout(self):
         uid = self.t.register_user("Eve")["user"]["id"]
@@ -680,7 +706,8 @@ class TutorialHTTPTests(unittest.TestCase):
         self.assertIn(b"tutorial", body)
         status, data = self.request("GET", "/api/tutorial/catalog")
         self.assertEqual(status, 200)
-        self.assertEqual(data["lesson_count"], 8)
+        self.assertEqual(data["lesson_count"], 9)
+        self.assertTrue(any(l["id"] == "l09-hardware-explode-and-actuators" for c in data["categories"] for l in c.get("lessons", [])))
 
     def test_user_quiz_and_llm_status(self):
         status, data = self.request("POST", "/api/tutorial/users", {"name": "HTTP-User"})

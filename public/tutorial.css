@@ -229,6 +229,19 @@
 .tut-empty{padding:48px 24px;text-align:center;color:#8a8a92;font-size:13px}
 .diff-box{max-height:280px;overflow:auto;background:#101216;color:#d7dbe3;border-radius:10px;padding:12px;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
 
+.hw-studio-host{margin:0 0 14px}
+.hw-studio{border:1px solid #e8e8ee;border-radius:12px;padding:12px;background:linear-gradient(160deg,#fafbfd 0%,#f3f5f8 100%)}
+.hw-studio-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:10px}
+.hw-studio-head strong{font-size:13px}
+.hw-studio-head .muted,.hw-hint.muted,.hw-ref-cap{font-size:11px;color:#8a8a92}
+.hw-studio-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(180px,.8fr);gap:12px}
+.hw-stage{height:280px;border-radius:10px;overflow:hidden;background:#eef1f5;border:1px solid #e2e5eb}
+.hw-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.hw-actions .button{font-size:11px;min-height:32px;padding:6px 12px}
+.hw-ref{width:100%;border-radius:10px;background:#111;max-height:160px;object-fit:cover}
+.hw-ref-cap{margin:6px 0 8px;line-height:1.45}
+.hw-hint{margin:0;line-height:1.5}
+
 @media(max-width:1100px){
   .tut-layout-bar{display:none}
   .tut-layout,
@@ -239,6 +252,8 @@
   .tut-code-resize,.tut-pane-resize{display:none}
   .tut-restore-dock{left:12px;right:12px;transform:none;justify-content:space-between}
   .tut-rollout-stage{height:220px}
+  .hw-studio-grid{grid-template-columns:1fr}
+  .hw-stage{height:240px}
   .nav-mega-grid{grid-template-columns:repeat(2,1fr)}
   .nav-mega-panel{left:0;transform:none}
 }

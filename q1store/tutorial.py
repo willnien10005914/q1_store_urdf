@@ -46,6 +46,7 @@ CATEGORY_HINTS = {
     "physics": ("physx", "newton", "mujoco", "warp", "solver", "contact", "physics"), "training": ("ppo", "rl", "reinforcement", "reward", "policy", "rsl"),
     "recording": ("video", "render", "visualizer", "viser", "rerun", "camera", "stream"), "deployment": ("deploy", "onnx", "sim-to-real", "sim2real", "export"),
     "migration": ("migrat", "3.0", "breaking", "upgrade", "deprecated"), "architecture": ("install", "uv", "cli", "launch", "preset"),
+    "hardware": ("hardware", "explod", "tof", "lidar", "sensor", "skin", "mechanism", "bom", "mass", "audio", "microphone"),
 }
 
 
@@ -1150,7 +1151,7 @@ class Tutorial:
 
 
 MEDIA = {"result.mp4": "video/mp4", "result.gif": "image/gif", "rollout.json": "application/json",
-         "result.json": "application/json", "evaluation.json": "application/json",
+         "result.json": "application/json", "evaluation.json": "application/json", "hardware.json": "application/json",
          "record.json": "application/json", "progress.json": "application/json", "run.log": "text/plain; charset=utf-8",
          "latest.pt": "application/octet-stream", "policy.onnx": "application/octet-stream", "policy.pt": "application/octet-stream",
          "policy_meta.json": "application/json", "params.json": "application/json", "example.py": "text/x-python; charset=utf-8",

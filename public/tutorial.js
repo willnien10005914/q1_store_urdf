@@ -1,6 +1,7 @@
 import {initI18n, getLocale, L, t, setLocale, applyI18n} from './i18n.js';
 import {renderMarkdown} from './markdown.js';
 import {createRobotViewer} from './robot-viewer.js';
+import {createHardwareStudio} from './hardware-studio.js';
 
 const USER_KEY = 'q1-tutorial-user';
 const ROBOT_KEY = 'q1-tutorial-robot';
@@ -81,6 +82,7 @@ const state = {
   runPoll: null,
   rolloutPlayer: null,
   robotManifest: null,
+  hardwareStudio: null,
   llm: null,
   pendingProposal: null,
   pendingDiff: null,
@@ -772,6 +774,7 @@ async function openLesson(id) {
   renderParams(lesson);
   renderQuiz(lesson);
   renderRefs(lesson);
+  mountHardwareStudio(lesson);
   document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'read'));
   document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'read'));
   renderSidebar();
@@ -783,6 +786,25 @@ async function openLesson(id) {
   if (media) { media.innerHTML = ''; delete media.dataset.mediaSig; }
   $('cancel-btn').hidden = true;
   $('resume-btn').hidden = true;
+}
+
+function mountHardwareStudio(lesson) {
+  state.hardwareStudio?.dispose?.();
+  state.hardwareStudio = null;
+  const host = $('hardware-studio');
+  if (!host) return;
+  const isHw = lesson?.id === 'l09-hardware-explode-and-actuators'
+    || lesson?.category === 'hardware'
+    || (lesson?.apis || []).some((a) => /explode|hardware/i.test(String(a)));
+  if (!isHw) {
+    host.hidden = true;
+    host.innerHTML = '';
+    return;
+  }
+  state.hardwareStudio = createHardwareStudio(host, {
+    ensureRobotManifest,
+    getRobotId: () => state.robot,
+  });
 }
 
 function renderParams(lesson) {
@@ -990,13 +1012,15 @@ function sanitizeRolloutFrames(frames) {
     lastPos = root_pos;
     lastQuat = root_quat;
     lastQ = q;
-    return {
+    const out = {
       ...frame,
       t: finiteOr(frame.t ?? frame.time, i * 0.033),
       root_pos,
       root_quat,
       q,
     };
+    if (frame.explode != null) out.explode = finiteOr(frame.explode, 0);
+    return out;
   });
 }
 
@@ -1112,8 +1136,15 @@ async function toggleRolloutPlayback(run, playBtn, statusEl, stageEl) {
         joints[name] = Number.isFinite(v) ? v : 0;
       });
       player.viewer.setJoints(joints);
+      if (Number.isFinite(frame.explode) && player.viewer.setExplode) {
+        player.viewer.setExplode(frame.explode);
+      }
+      if (frame.skin && player.viewer.setSkin) player.viewer.setSkin(frame.skin);
       if (statusEl) {
-        statusEl.textContent = `rollout · ${frameTime(frame).toFixed(2)} s` +
+        const explodeNote = Number.isFinite(frame.explode)
+          ? ` · explode ${frame.explode.toFixed(2)}`
+          : '';
+        statusEl.textContent = `rollout · ${frameTime(frame).toFixed(2)} s${explodeNote}` +
           (player.rollout.survived === false ? (getLocale() === 'en' ? ' · ended early' : ' · 回合提前終止') : '');
       }
       player.raf = requestAnimationFrame(step);

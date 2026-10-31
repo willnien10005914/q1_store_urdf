@@ -16,7 +16,9 @@
     {"id": "recording", "label": "視覺化與錄影", "label_en": "Visualizers & recording", "order": 7,
      "description": "--viz kit／newton_gl／viser／rerun、VideoRecorderCfg、HEADLESS=1、瀏覽器串流。"},
     {"id": "deployment", "label": "部署", "label_en": "Deployment", "order": 8,
-     "description": "LEAPP／ONNX 匯出、PhysX↔Newton 策略轉移、Q1 部署契約。"}
+     "description": "LEAPP／ONNX 匯出、PhysX↔Newton 策略轉移、Q1 部署契約。"},
+    {"id": "hardware", "label": "硬體／機構", "label_en": "Hardware & mechanisms", "order": 9,
+     "description": "Q1 爆炸圖、感測器／音訊佈局、skin 與質量，並接到 Isaac Lab 致動器參數。"}
   ],
   "levels": [
     {"id": "novice", "label": "新手", "label_en": "Novice", "min_completed": 0, "min_score": 0},
