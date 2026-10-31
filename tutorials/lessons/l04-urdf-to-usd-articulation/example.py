@@ -52,6 +52,12 @@ from isaaclab_physx.physics import PhysxCfg  # noqa: E402  (importer 3.0 runs in
 
 sim_cfg = SimulationCfg(dt=1 / 200, device="cuda:0", physics=PhysxCfg())
 with launch_simulation(sim_cfg):
+    try:
+        import lab3_compat
+        lab3_compat.patch_urdf_importer()
+    except Exception as exc:
+        print(f"[q1] lab3_compat patch skipped: {exc}")
+
     import isaaclab.sim as sim_utils
     from isaaclab.assets import Articulation, ArticulationCfg, AssetBaseCfg
     from isaaclab.actuators import ImplicitActuatorCfg

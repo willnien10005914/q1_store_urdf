@@ -241,22 +241,17 @@ setup_isaaclab() {
     MISSING=1
   else
     local stamp="$root/.q1_store_uv_sync_stamp"
-    local want_extra=""
-    [[ "$WITH_ISAACSIM" -eq 1 ]] && want_extra="isaacsim"
+    # URDF→USD needs the standalone importer (isaacsim-asset-isolated), not full Isaac Sim.
+    local want_extra="importers"
+    [[ "$WITH_ISAACSIM" -eq 1 ]] && want_extra="importers,isaacsim"
     local prev=""
     [[ -f "$stamp" ]] && prev="$(cat "$stamp" 2>/dev/null || true)"
-    # Skip if .venv exists and stamp matches, or base sync already done and we don't need isaacsim.
-    if [[ -d "$root/.venv" && -f "$stamp" ]] \
-        && { [[ "$prev" == "extra=$want_extra" ]] \
-          || [[ -z "$want_extra" && -n "$prev" ]]; }; then
+    if [[ -d "$root/.venv" && -f "$stamp" && "$prev" == "extra=$want_extra" ]]; then
       skip "uv sync already done ($prev)"
     else
-      log "uv sync${want_extra:+ --extra $want_extra} — may take a while"
-      if [[ -n "$want_extra" ]]; then
-        (cd "$root" && uv sync --extra "$want_extra")
-      else
-        (cd "$root" && uv sync)
-      fi
+      log "uv sync --extra ${want_extra//,/ --extra } — may take a while"
+      # shellcheck disable=SC2086
+      (cd "$root" && uv sync $(printf -- '--extra %s ' ${want_extra//,/ }))
       printf 'extra=%s\n' "$want_extra" >"$stamp"
       ok "uv sync complete"
     fi

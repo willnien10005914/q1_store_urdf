@@ -13,7 +13,7 @@
   "params": [
     {"key": "physics", "label": "物理 preset", "type": "select", "default": "newton_mjwarp",
      "options": ["newton_mjwarp", "isaacsim_physx", "ovphysx"],
-     "help": "physics=newton_mjwarp 不需要 Isaac Sim；isaacsim_physx 需要 --extra isaacsim。"},
+     "help": "physics=newton_mjwarp 不需要完整 Isaac Sim，但仍需 uv sync --extra importers（URDF→USD）。isaacsim_physx 才需要 --extra isaacsim。"},
     {"key": "num_envs", "label": "平行環境數", "type": "int", "default": 16, "min": 1, "max": 4096,
      "help": "第一次啟動用少量環境確認場景與資產，再放大。"},
     {"key": "viz", "label": "視覺化器", "type": "select", "default": "none",

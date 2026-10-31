@@ -261,7 +261,8 @@ class Tutorial:
             return {"mode": "python", "label": "本機 python3（純 Python 範例）", "command": [self.python]}
         root = self.isaaclab3_root
         if root and (root / "pyproject.toml").is_file() and self.uv:
-            command = [self.uv, "run", "--project", str(root)]
+            # Always pull the standalone URDF/MJCF importer; full Kit only when PhysX/Kit viz requested.
+            command = [self.uv, "run", "--project", str(root), "--extra", "importers"]
             physics = (params or {}).get("physics")
             if physics == "isaacsim_physx" or (params or {}).get("viz") in ("kit", "newton_rtx"):
                 command += ["--extra", "isaacsim"]
@@ -493,7 +494,11 @@ class Tutorial:
             command.append("--resume")
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/tmp"), "LANG": "C.UTF-8",
                "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1", "HEADLESS": "1", "Q1_TUTORIAL_RUN": run["id"]}
-        for key in ("CUDA_VISIBLE_DEVICES", "HF_HOME", "XDG_CACHE_HOME", "DISPLAY", "LD_LIBRARY_PATH", "ISAACSIM_PATH", "UV_CACHE_DIR"):
+        # Kitless URDF importer lacks PhysxSchema; sitecustomize patches add_joint_schemas.
+        compat = str((Path(__file__).resolve().parent / "runpath"))
+        env["PYTHONPATH"] = compat + (os.pathsep + os.environ["PYTHONPATH"] if os.environ.get("PYTHONPATH") else "")
+        for key in ("CUDA_VISIBLE_DEVICES", "HF_HOME", "XDG_CACHE_HOME", "DISPLAY", "LD_LIBRARY_PATH",
+                    "ISAACSIM_PATH", "UV_CACHE_DIR", "Q1_ISAACLAB3_ROOT"):
             if key in os.environ:
                 env[key] = os.environ[key]
         log = (directory / "run.log").open("ab")

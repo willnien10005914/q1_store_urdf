@@ -64,6 +64,11 @@ if P.get("viz", "none") != "none":
 progress("starting", 0, 1, message=f"launching {PHYSICS}")
 
 with launch_simulation(sim_cfg):
+    try:
+        import lab3_compat
+        lab3_compat.patch_urdf_importer()
+    except Exception as exc:
+        print(f"[q1] lab3_compat patch skipped: {exc}")
     # ---- 2. runtime imports only after launch -----------------------------------------------
     import torch
     import isaaclab.sim as sim_utils

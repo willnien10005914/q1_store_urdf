@@ -34,6 +34,8 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {}}},
     {"name": "repair_isaaclab_cuda", "description": "Repair Isaac Lab 3 torch wheel to match the local NVIDIA driver (e.g. cu130→cu128 on CUDA 12.8 drivers). Safe to call when diagnose_runtime reports a mismatch.",
      "parameters": {"type": "object", "properties": {}}},
+    {"name": "repair_isaaclab_importers", "description": "Install Isaac Lab 3 standalone URDF/MJCF importers (uv sync --extra importers / isaacsim-asset-isolated). Use when run.log shows ModuleNotFoundError: No module named 'isaacsim'.",
+     "parameters": {"type": "object", "properties": {}}},
     {"name": "propose_code", "description": "Propose a full replacement example.py. The learner sees a diff and must accept it; explain why.",
      "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "explanation": {"type": "string"}}, "required": ["code", "explanation"]}},
     {"name": "set_params", "description": "Set lesson parameters (sliders) for the learner, e.g. {\"num_envs\": 2048}.",
@@ -210,6 +212,16 @@ class Agent:
                 pass
         self.t.append_message(uid, lesson_id, "user", message)
         self.t.touch_last(uid, lesson_id, robot)
+        # Slash commands + repair intents must run real tools. The 8B Hermes GGUF often
+        # ignores <tool_call> and just asks for more info — never let that block fixes.
+        cmd = message.split(None, 1)[0] if message else ""
+        force_tools = cmd.startswith("/") or bool(REPAIR_HINT.search(message))
+        if force_tools:
+            yield from OfflineTutor(self).respond(
+                uid, lesson, context, message,
+                note="以工具模式處理修復／指令（讀 log、診斷環境、必要時自動修 CUDA／importers）。",
+            )
+            return
         if self.llm is not None and self.llm.chat_ready():
             yield from self._hermes(uid, lesson, context, message)
         else:
@@ -278,6 +290,8 @@ class Agent:
                 return self._diagnose_runtime(context), events
             if name == "repair_isaaclab_cuda":
                 return self._repair_isaaclab_cuda(), events
+            if name == "repair_isaaclab_importers":
+                return self._repair_isaaclab_importers(), events
             if name == "propose_code":
                 code = str(arguments.get("code", ""))
                 if not code.strip():
@@ -407,6 +421,16 @@ class Agent:
                     if "+cu130" in ver and drv.startswith("12."):
                         info["issues"].append(f"torch {ver} requires CUDA 13-capable driver; host reports {drv}")
                         info["hints"].append("repair_isaaclab_cuda will pin torch to cu128")
+                    try:
+                        imp = subprocess.run(
+                            [str(py), "-c", "from isaacsim.asset.importer.urdf import URDFImporter; print('ok')"],
+                            capture_output=True, text=True, timeout=60)
+                        info["urdf_importer"] = {"ok": imp.returncode == 0, "stderr": (imp.stderr or "")[-500:]}
+                        if imp.returncode != 0:
+                            info["issues"].append("URDF importer missing (No module named 'isaacsim') — need uv sync --extra importers")
+                            info["hints"].append("Call repair_isaaclab_importers (standalone isaacsim-asset-isolated; full Isaac Sim not required for newton_mjwarp)")
+                    except Exception as exc:
+                        info["issues"].append(f"urdf importer probe failed: {exc}")
                 except Exception as exc:
                     info["issues"].append(f"torch probe failed: {exc}")
 
@@ -438,6 +462,30 @@ class Agent:
         if ok:
             result["diagnose"] = self._diagnose_runtime()
             result["note"] = "Torch repaired. Ask the learner to re-run the lesson (start_run)."
+        return result
+
+    def _repair_isaaclab_importers(self):
+        root = self.t.isaaclab3_root
+        if not root or not (root / "pyproject.toml").is_file():
+            return {"ok": False, "error": "Q1_ISAACLAB3_ROOT unset or invalid"}
+        uv = self.t.uv or "uv"
+        try:
+            proc = subprocess.run(
+                [uv, "sync", "--extra", "importers"],
+                cwd=str(root), capture_output=True, text=True, timeout=900)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "uv sync --extra importers timed out"}
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or ""))[-4000:]
+        ok = proc.returncode == 0
+        if ok:
+            stamp = root / ".q1_store_uv_sync_stamp"
+            prev = stamp.read_text().strip() if stamp.is_file() else "extra="
+            if "importers" not in prev:
+                stamp.write_text("extra=importers\n")
+        result = {"ok": ok, "exit_code": proc.returncode, "log": out}
+        if ok:
+            result["diagnose"] = self._diagnose_runtime()
+            result["note"] = "Importers installed. Re-run the lesson; URDF→USD no longer needs full Isaac Sim."
         return result
 
     # ---------------------------------------------------------- code accept
@@ -589,6 +637,11 @@ class OfflineTutor:
 
         err_blob = f"{log_info.get('error') or ''} {log_info.get('log_tail') or ''}".lower()
         needs_cuda = any(k in err_blob for k in ("cuda", "driver", "12080", "cu130")) or any("torch" in i.lower() or "cuda" in i.lower() for i in issues)
+        needs_importers = (
+            "no module named 'isaacsim'" in err_blob
+            or "urdf importer" in " ".join(issues).lower()
+            or not ((diag.get("urdf_importer") or {}).get("ok", True))
+        )
         if do_repair and needs_cuda:
             reasoning.append("偵測到 CUDA/driver 不符，執行 repair_isaaclab_cuda")
             yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
@@ -601,7 +654,27 @@ class OfflineTutor:
                 answer_parts.append(f"自動修復失敗：{repaired.get('error') or repaired.get('log')}")
         elif needs_cuda:
             answer_parts.append("這像是 **torch CUDA 與 NVIDIA driver 不符**。輸入 `/fix` 讓我執行 `repair_isaaclab_cuda`，或手動：`bash scripts/repair_isaaclab_cuda.sh`。")
-        else:
+
+        if do_repair and needs_importers:
+            reasoning.append("偵測到缺 URDF importer（isaacsim），執行 repair_isaaclab_importers")
+            yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+            yield {"type": "tool_call", "name": "repair_isaaclab_importers", "arguments": {}}
+            repaired, _ = self.agent.run_tool(uid, lesson, context, "repair_isaaclab_importers", {})
+            yield {"type": "tool_result", "name": "repair_isaaclab_importers", "result": self.agent.summarize(repaired)}
+            if repaired.get("ok"):
+                answer_parts.append(
+                    "已安裝 **isaaclab[importers]**（`isaacsim-asset-isolated`）。"
+                    "這不是完整 Isaac Sim；`physics=newton_mjwarp` 用 URDF 時需要它。"
+                    "請再按「執行」。"
+                )
+            else:
+                answer_parts.append(f"安裝 importers 失敗：{repaired.get('error') or repaired.get('log')}")
+        elif needs_importers:
+            answer_parts.append(
+                "錯誤是 **`No module named 'isaacsim'`**：Lab 3 的 URDF→USD 需要 "
+                "`uv sync --extra importers`。輸入 `/fix` 自動安裝，或手動在 `Q1_ISAACLAB3_ROOT` 執行該指令。"
+            )
+        elif not needs_cuda:
             answer_parts.append("若錯誤在 example.py，請貼出關鍵行或輸入 `/code <關鍵字>`；修好後用 `/run` 再跑一次。")
 
     @staticmethod

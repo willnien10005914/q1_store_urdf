@@ -55,6 +55,11 @@ if args.phase == "record":
 write_json(PROGRESS, {"phase": "starting", "iteration": 0, "max_iterations": int(P.get("max_iterations", 300)), "elapsed_s": 0, "updated_at": time.time()})
 
 with launch_simulation(sim_cfg):
+    try:
+        import lab3_compat
+        lab3_compat.patch_urdf_importer()
+    except Exception as exc:
+        print(f"[q1] lab3_compat patch skipped: {exc}")
     import torch
     import isaaclab.sim as sim_utils
     import isaaclab.envs.mdp as mdp
