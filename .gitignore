@@ -11,3 +11,7 @@ node_modules/
 
 .data/
 dist/
+
+.venv-llm/
+.data/llama-cpp/
+.data/models/
