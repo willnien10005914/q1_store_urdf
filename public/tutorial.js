@@ -32,6 +32,10 @@ const state = {
   lessonId: null,
   lesson: null,
   originalCode: '',
+  baselineCode: '',
+  codeMarks: {}, // lineIndex -> {source:'manual'|'hermes'|'note', note?}
+  codeEditTimer: null,
+  codeWide: false,
   runId: null,
   lastRun: null,
   runPoll: null,
@@ -39,6 +43,210 @@ const state = {
   pendingProposal: null,
   pendingDiff: null,
 };
+
+/* ---------- Solarized-lite code editor (line numbers + change marks) ---------- */
+const NOTE_HERMES = /^#\s*\[Hermes/;
+const NOTE_MANUAL = /^#\s*\[手動|#\s*\[Manual/i;
+
+function labEl() {
+  return document.querySelector('.tut-lab');
+}
+
+function setCodeExpanded(on) {
+  const lab = labEl();
+  if (!lab) return;
+  lab.classList.toggle('is-editing', !!on || state.codeWide);
+  if (state.codeWide) lab.classList.add('is-wide');
+}
+
+function lineDiffIndexes(before, after) {
+  const a = String(before || '').split('\n');
+  const b = String(after || '').split('\n');
+  const n = a.length, m = b.length;
+  const dp = Array.from({length: n + 1}, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const changed = new Set();
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }
+    else { changed.add(j); j++; }
+  }
+  while (j < m) { changed.add(j); j++; }
+  return changed;
+}
+
+function syncCodeChrome() {
+  const ta = $('code');
+  const gutter = $('code-gutter');
+  const backdrop = $('code-backdrop');
+  if (!ta || !gutter || !backdrop) return;
+  const lines = ta.value.split('\n');
+  const n = Math.max(lines.length, 1);
+  gutter.textContent = Array.from({length: n}, (_, i) => String(i + 1)).join('\n');
+  backdrop.innerHTML = lines.map((line, i) => {
+    const mark = state.codeMarks[i];
+    let cls = 'ln';
+    if (mark?.source === 'hermes') cls += ' hermes';
+    else if (mark?.source === 'manual') cls += ' manual';
+    if (NOTE_HERMES.test(line) || NOTE_MANUAL.test(line)) cls += ' note';
+    return `<span class="${cls}">${escapeHtml(line) || ' '}</span>`;
+  }).join('\n');
+  gutter.scrollTop = ta.scrollTop;
+  backdrop.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+}
+
+function setCode(value, {baseline = false, marks = null, expand = false} = {}) {
+  const ta = $('code');
+  if (!ta) return;
+  ta.value = value ?? '';
+  if (baseline || !state.baselineCode) state.baselineCode = ta.value;
+  if (marks) state.codeMarks = marks;
+  else if (baseline) state.codeMarks = {};
+  syncCodeChrome();
+  if (expand) setCodeExpanded(true);
+}
+
+function annotateChangedLines(before, after, source, explanation) {
+  const changed = lineDiffIndexes(before, after);
+  if (!changed.size) return after;
+  const lines = after.split('\n');
+  const note = (explanation || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  const tag = source === 'hermes'
+    ? `# [Hermes] ${note || (getLocale() === 'en' ? 'Suggested edit — press Run to verify.' : '建議修改 — 請按「執行」驗證。')}`
+    : `# [手動] ${note || (getLocale() === 'en' ? 'Your edit — press Run to verify.' : '你的修改 — 請按「執行」驗證。')}`;
+  const out = [];
+  const newMarks = {...state.codeMarks};
+  let inserted = 0;
+  const sorted = [...changed].sort((a, b) => a - b);
+  let cursor = 0;
+  for (const idx of sorted) {
+    while (cursor < idx) {
+      out.push(lines[cursor]);
+      cursor++;
+    }
+    const prev = out[out.length - 1] || '';
+    if (!NOTE_HERMES.test(prev) && !NOTE_MANUAL.test(prev)) {
+      out.push(tag);
+      newMarks[out.length - 1] = {source: 'note'};
+      inserted++;
+    }
+    out.push(lines[idx]);
+    newMarks[out.length - 1] = {source, note};
+    cursor = idx + 1;
+  }
+  while (cursor < lines.length) {
+    out.push(lines[cursor]);
+    cursor++;
+  }
+  // Remap any old marks roughly by shifting after inserts — keep only newMarks for changed region.
+  state.codeMarks = newMarks;
+  // Also mark remaining changed content lines that already had comments
+  const remapped = lineDiffIndexes(before, out.join('\n'));
+  remapped.forEach((i) => {
+    const line = out[i] || '';
+    if (NOTE_HERMES.test(line) || NOTE_MANUAL.test(line)) state.codeMarks[i] = {source: 'note'};
+    else if (!state.codeMarks[i] || state.codeMarks[i].source === 'note') state.codeMarks[i] = {source, note};
+  });
+  return out.join('\n');
+}
+
+function onCodeInput() {
+  setCodeExpanded(true);
+  const ta = $('code');
+  const before = state.baselineCode || state.originalCode || '';
+  const after = ta.value;
+  const changed = lineDiffIndexes(before, after);
+  const next = {};
+  Object.entries(state.codeMarks).forEach(([k, v]) => {
+    if (v.source === 'hermes' || v.source === 'note') next[k] = v;
+  });
+  changed.forEach((i) => {
+    const line = after.split('\n')[i] || '';
+    if (NOTE_HERMES.test(line)) next[i] = {source: 'note'};
+    else if (NOTE_MANUAL.test(line)) next[i] = {source: 'note'};
+    else if (state.codeMarks[i]?.source === 'hermes') next[i] = state.codeMarks[i];
+    else next[i] = {source: 'manual'};
+  });
+  state.codeMarks = next;
+  syncCodeChrome();
+  clearTimeout(state.codeEditTimer);
+  state.codeEditTimer = setTimeout(() => {
+    // After idle, inject a single manual annotation block if missing.
+    const cur = $('code').value;
+    if (cur === before) return;
+    const annotated = annotateChangedLines(before, cur, 'manual', '');
+    if (annotated !== cur) {
+      const sel = $('code').selectionStart;
+      setCode(annotated, {marks: state.codeMarks});
+      try { $('code').selectionStart = $('code').selectionEnd = sel; } catch {}
+    }
+    state.baselineCode = $('code').value;
+  }, 1600);
+}
+
+function wireCodeEditor() {
+  const ta = $('code');
+  const scroll = $('code-scroll');
+  const gutter = $('code-gutter');
+  if (!ta) return;
+  ta.addEventListener('input', onCodeInput);
+  ta.addEventListener('scroll', () => {
+    if (gutter) gutter.scrollTop = ta.scrollTop;
+    const backdrop = $('code-backdrop');
+    if (backdrop) backdrop.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+  });
+  ta.addEventListener('focus', () => setCodeExpanded(true));
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      ta.value = ta.value.slice(0, start) + '    ' + ta.value.slice(end);
+      ta.selectionStart = ta.selectionEnd = start + 4;
+      onCodeInput();
+    }
+  });
+  $('code-widen')?.addEventListener('click', () => {
+    state.codeWide = !state.codeWide;
+    const lab = labEl();
+    lab?.classList.toggle('is-wide', state.codeWide);
+    lab?.classList.toggle('is-editing', true);
+    $('code-widen').textContent = state.codeWide
+      ? (getLocale() === 'en' ? 'Narrow' : '縮回')
+      : (getLocale() === 'en' ? 'Widen' : '加寬');
+  });
+  const handle = $('code-resize');
+  if (handle) {
+    let dragging = false;
+    handle.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      labEl()?.classList.add('is-resizing', 'is-editing');
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const lab = labEl();
+      if (!lab) return;
+      const rect = lab.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ratio = Math.min(0.82, Math.max(0.42, x / rect.width));
+      lab.style.setProperty('--tut-code-fr', `${(ratio / (1 - ratio)).toFixed(3)}fr`);
+      state.codeWide = true;
+      lab.classList.add('is-wide');
+    });
+    const stop = () => { dragging = false; labEl()?.classList.remove('is-resizing'); };
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+  }
+  if (scroll) {
+    const ro = new ResizeObserver(() => syncCodeChrome());
+    ro.observe(scroll);
+  }
+}
 
 function localeTitle(obj) {
   return getLocale() === 'en' ? (obj.title_en || obj.title) : (obj.title || obj.title_en);
@@ -231,7 +439,11 @@ async function openLesson(id) {
   $('lesson-runtime').textContent = lesson.runtime?.label || '';
   $('lesson-minutes').textContent = (lesson.minutes || '?') + ' min';
   $('lesson-md').innerHTML = renderMarkdown(lesson.markdown || '');
-  $('code').value = lesson.draft_code || lesson.code || '';
+  setCode(lesson.draft_code || lesson.code || '', {baseline: true});
+  setCodeExpanded(false);
+  state.codeWide = false;
+  labEl()?.classList.remove('is-wide');
+  if ($('code-widen')) $('code-widen').textContent = getLocale() === 'en' ? 'Widen' : '加寬';
   renderParams(lesson);
   renderQuiz(lesson);
   renderRefs(lesson);
@@ -686,14 +898,23 @@ function wire() {
   document.querySelectorAll('.tut-tabs button').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('.tut-tabs button').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === b.dataset.tab));
+    if (b.dataset.tab === 'lab') {
+      requestAnimationFrame(() => { syncCodeChrome(); $('code')?.focus({preventScroll: true}); });
+    }
   }));
 
-  $('code-reset').addEventListener('click', () => { $('code').value = state.originalCode; });
+  $('code-reset').addEventListener('click', () => {
+    setCode(state.originalCode, {baseline: true});
+    setCodeExpanded(false);
+    toast(getLocale()==='en'?'Restored original example.py':'已還原原文');
+  });
   $('code-save').addEventListener('click', async () => {
     if (!state.user || !state.lessonId) return;
     await api(`/api/tutorial/users/${state.user.id}/lessons/${state.lessonId}/draft`, {code: $('code').value, params: collectParams()});
+    state.baselineCode = $('code').value;
     toast(getLocale()==='en'?'Draft saved':'草稿已存');
   });
+  wireCodeEditor();
   $('run-btn').addEventListener('click', () => startRun().catch((e) => toast(e.message)));
   $('cancel-btn').addEventListener('click', async () => {
     if (!state.runId) return;
@@ -772,9 +993,15 @@ function wire() {
   $('diff-accept').addEventListener('click', async () => {
     if (!state.pendingDiff || !state.user) return;
     await api('/api/agent/accept', {user: state.user.id, lesson: state.lessonId, proposal_id: state.pendingDiff.proposal_id});
-    $('code').value = state.pendingDiff.code;
+    const before = $('code').value;
+    const raw = state.pendingDiff.code || before;
+    const annotated = annotateChangedLines(before, raw, 'hermes', state.pendingDiff.explanation || '');
+    setCode(annotated, {expand: true});
+    state.baselineCode = annotated;
+    document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
+    document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
     $('diff-dialog').close();
-    toast(getLocale()==='en'?'Code applied':'已採用程式碼');
+    toast(getLocale()==='en'?'Hermes edit applied — review yellow lines, then Run':'已採用 Hermes 修改（黃線），請檢查後按「執行」');
   });
 
   window.addEventListener('hashchange', () => {

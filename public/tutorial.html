@@ -101,13 +101,26 @@
         <div class="tut-pane active" data-pane="read"><div class="tut-md" id="lesson-md"></div></div>
         <div class="tut-pane" data-pane="lab">
           <div class="tut-lab">
-            <div class="tut-code-wrap">
-              <div class="tut-actions">
-                <strong style="font-size:12px">example.py</strong>
+            <div class="tut-code-wrap" id="code-wrap">
+              <div class="tut-code-toolbar">
+                <strong>example.py</strong>
+                <span class="tut-code-legend" title="底線／底色標示來源">
+                  <i class="mark hermes"></i> Hermes
+                  <i class="mark manual"></i> 手動
+                </span>
+                <button type="button" class="text-link" id="code-widen" title="加寬編輯區">加寬</button>
                 <button type="button" class="text-link" id="code-reset">還原原文</button>
                 <button type="button" class="text-link" id="code-save">存草稿</button>
               </div>
-              <textarea id="code" spellcheck="false" aria-label="example.py"></textarea>
+              <div class="tut-code-editor solarized-lite" id="code-editor">
+                <pre class="tut-code-gutter" id="code-gutter" aria-hidden="true">1</pre>
+                <div class="tut-code-scroll" id="code-scroll">
+                  <pre class="tut-code-backdrop" id="code-backdrop" aria-hidden="true"></pre>
+                  <textarea id="code" spellcheck="false" aria-label="example.py" wrap="off"></textarea>
+                </div>
+              </div>
+              <div class="tut-code-resize" id="code-resize" role="separator" aria-orientation="vertical" aria-label="調整程式碼寬度" title="拖曳調整寬度"></div>
+              <p class="tut-code-hint" id="code-hint">行號左側；黃底＝Hermes、藍底線＝你的修改。變更會自動加註解，按「執行」驗證。</p>
             </div>
             <div>
               <div class="tut-params" id="params"></div>
