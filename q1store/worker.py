@@ -19,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-from .paths import host_platform_info, resolve_gpu_lock, resolve_leg_root
+from .paths import host_platform_info, resolve_gpu_lock, resolve_leg_root, with_isaac_ld_library_path
 from .service import Store, num_envs_for_hours
 
 RUNNING_STATES = ("preparing", "waiting_for_gpu", "starting_isaac", "training", "evaluating", "recording")
@@ -274,6 +274,10 @@ class Worker:
         command = self.command(directory, phase, extra)
         env = {k: v for k, v in os.environ.items() if k != "Q1_LEG_CURRICULUM_CONFIG"}
         env.update(Q1_LEG_ROOT=str(self.leg_root), PYTHONUNBUFFERED="1")
+        # Binary Isaac Sim torch on x86 RTX needs nvidia-* / ml_archive libs on LD_LIBRARY_PATH
+        # (libcusparseLt / libcufile / libcupti). isaac_env.sh does the same; keep a store-side
+        # safety net when an older leg checkout is used.
+        env = with_isaac_ld_library_path(env, self.leg_root)
         log_path = directory / "native.log"
         with log_path.open("ab") as log:
             log.write(f"\n===== {phase} phase started {time.strftime('%Y-%m-%d %H:%M:%S %z')} =====\n".encode())

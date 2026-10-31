@@ -109,3 +109,66 @@ def host_platform_info():
         "gpu": nvidia_gpu_name(),
     }
     return info
+
+
+def isaac_nvidia_lib_dirs(leg_root: Path | None = None):
+    """Directories that must sit on ``LD_LIBRARY_PATH`` for Isaac Sim torch.
+
+    Binary Isaac Sim 5 / torch+cu128 on x86 RTX hosts fail with
+    ``libcusparseLt.so.0`` / ``libcufile.so.0`` / ``libcupti.so.12`` unless the
+    bundled ``nvidia-*`` and ``omni.isaac.ml_archive`` libs are visible. Spark
+    pip installs often already resolve these; prepending is still safe.
+    """
+    roots: list[Path] = []
+    env_sim = os.environ.get("ISAAC_SIM_PATH")
+    if env_sim:
+        roots.append(Path(env_sim))
+    home = Path.home()
+    roots.extend([home / "isaacsim", home / "isaac/isaacsim", home / "IsaacLab/_isaac_sim"])
+    if leg_root is not None:
+        # No direct sim path under leg; kept for future vendor layouts.
+        pass
+    env_venv = os.environ.get("ISAAC_VENV")
+    seen: set[Path] = set()
+    dirs: list[Path] = []
+
+    def add_lib(path: Path):
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return
+        if not resolved.is_dir() or resolved in seen:
+            return
+        seen.add(resolved)
+        dirs.append(resolved)
+
+    if env_venv:
+        for site in Path(env_venv).expanduser().glob("lib/python*/site-packages"):
+            for lib in list(site.glob("nvidia/*/lib")) + list(site.glob("nvidia/cu*/lib")) + list(site.glob("cusparselt/lib")):
+                add_lib(lib)
+
+    for sim in roots:
+        sim = Path(sim).expanduser()
+        if not sim.exists():
+            continue
+        for site in sim.glob("kit/python/lib/python*/site-packages"):
+            for lib in list(site.glob("nvidia/*/lib")) + list(site.glob("nvidia/cu*/lib")):
+                add_lib(lib)
+        prebundle = sim / "exts/omni.isaac.ml_archive/pip_prebundle"
+        if prebundle.is_dir():
+            for lib in prebundle.rglob("lib"):
+                if lib.is_dir():
+                    add_lib(lib)
+    return dirs
+
+
+def with_isaac_ld_library_path(env: dict | None = None, leg_root: Path | None = None):
+    """Return a copy of ``env`` with Isaac NVIDIA lib dirs prepended."""
+    merged = dict(os.environ if env is None else env)
+    dirs = isaac_nvidia_lib_dirs(leg_root)
+    if not dirs:
+        return merged
+    existing = [part for part in (merged.get("LD_LIBRARY_PATH") or "").split(":") if part]
+    prefix = [str(path) for path in dirs if str(path) not in existing]
+    merged["LD_LIBRARY_PATH"] = ":".join(prefix + existing)
+    return merged
