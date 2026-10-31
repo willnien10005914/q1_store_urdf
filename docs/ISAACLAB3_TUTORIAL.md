@@ -98,15 +98,28 @@ python3 -m q1store.tutorial mark-created <proposal_id> <lesson_id>
 
 沒有 Lab 3 時，需要 GPU 的課程會標 `blocked` 並寫明原因；**不會假裝訓練成功**。l07 仍可用 kinematic fallback 練習 rollout 契約。
 
-## 本機 LLM
+## 本機 LLM（Hermes）
 
-建議路徑（16 GB 筆電 GPU）：
+建議路徑（16 GB 筆電 GPU，Ubuntu 22.04）：
 
-1. 安裝 `huggingface_hub`（下載）與 `llama-cpp-python[server]` 或系統 `llama-server`  
-2. 在 Tutorial 頁下載 **Hermes 3 · 8B Q4_K_M GGUF**  
-3. 按「啟動」；agent 模式變成 Hermes，reasoning 視窗顯示 `<think>`  
+```bash
+# 一次性：venv + CUDA wheel + server 依賴
+python3.11 -m venv .venv-llm
+.venv-llm/bin/pip install 'llama-cpp-python[server]' \
+  --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+# 下載 cudart（若系統沒有 libcudart.so.12）到 .data/llama-cpp/cudart/…
+# 下載 GGUF 到 .data/models/NousResearch--Hermes-3-Llama-3.1-8B-GGUF/
 
-亦可設 `Q1_LLM_BASE_URL=http://127.0.0.1:8000/v1` 指向已有的 vLLM／OpenWebUI。
+# 啟動 Hermes（GPU）
+bash scripts/hermes_server.sh          # http://127.0.0.1:8877/v1
+
+# 啟動 store 並接上 Hermes
+Q1_LLM_BASE_URL=http://127.0.0.1:8877/v1 \
+Q1_LLM_MODEL="$(curl -s http://127.0.0.1:8877/v1/models | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"][0]["id"])')" \
+bash scripts/start_store.sh --port 8878
+```
+
+Tutorial 頁右上角應顯示 **Hermes**；reasoning 視窗會出現 `<think>`。
 
 沒有 LLM 時離線助教仍可用：`/search`、`/arxiv`、`/params`、`/run`、`/propose`…
 
