@@ -59,7 +59,9 @@ CLI 的 `physics=newton_mjwarp` 會把整個 `sim.physics` 區段換成該欄位
 1. 先用 `physics=newton_mjwarp`、`num_envs=64` 跑一次，記下 result.json。
 2. 改 `isaacsim_physx` 再跑一次。
 3. 把 `dt` 從 0.005 調到 0.01，看哪個後端先出現穿透或翻倒。
-4. 把 `solver_iterations` 調到 1，再調到 16。
+4. 把參數 `solver_iterations` 調到 1，再調到 16（Newton 會映射成
+   `NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=…))`；PhysX 則用
+   `max_position_iteration_count`）。
 
 問自己：Q1 Wheel 的輪子是 `continuous` joint，兩個後端對「無限旋轉關節」的處理一樣嗎？（提示：檢查 `robot.data.joint_pos.torch` 的範圍。）
 

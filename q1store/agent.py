@@ -92,6 +92,12 @@ LOG_EDIT_HINT = re.compile(
 )
 FENCED_PY_RE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.I | re.S)
 PHYSX_HINT = re.compile(r"physxjointapi|physxschema|add_joint_schemas|cannot find a valid schema", re.I)
+EXAMPLE_API_HINT = re.compile(
+    r"unexpected keyword argument|TypeError:|AttributeError:|got an unexpected keyword|"
+    r"NewtonCfg\.__init__|PhysxCfg\.__init__|has no attribute|"
+    r"File \"example\.py\"",
+    re.I,
+)
 TAG_RE = re.compile(r"<think>|</think>|<tool_call>|</tool_call>")
 
 
@@ -214,9 +220,12 @@ class Agent:
             "3) if diagnose reports torch/driver mismatch call repair_isaaclab_cuda, "
             "4) if the error mentions PhysxJointAPI / PhysxSchema / ApplyAPI call repair_physx_joint (kitless URDF; NOT an example.py string search), "
             "5) if No module named 'isaacsim' call repair_isaaclab_importers, "
-            "6) for real example.py bugs or when the learner asks to 加 log / 改程式: call apply_code (or propose_code with apply=true) "
+            "6) if TypeError/unexpected keyword/AttributeError points at example.py (e.g. NewtonCfg(solver_iterations=…)): "
+            "call apply_code with a corrected FULL example.py — Lab 3 uses NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=N)). "
+            "Also give a short Cursor prompt if the store lesson file itself is wrong. "
+            "7) for other example.py bugs or when the learner asks to 加 log / 改程式: call apply_code "
             "with the FULL updated example.py — never claim you edited the file without that tool. "
-            "7) then start_run to verify. "
+            "8) then start_run to verify. "
             "When the learner asks about 結果/影片/rollout/推論/metrics after a run: call analyze_run, summarize metrics honestly, "
             "and tell them the Lab panel plays result.mp4 (if present) or the Three.js rollout player. "
             "Do NOT ask which lesson — you already know it from context. Never reply that you cannot understand a fix request. "
@@ -1051,7 +1060,50 @@ class OfflineTutor:
             or not ((diag.get("urdf_importer") or {}).get("ok", True))
         )
         needs_physx = bool(PHYSX_HINT.search(err_blob)) or bool(PHYSX_HINT.search(message or ""))
+        needs_example_api = bool(EXAMPLE_API_HINT.search(err_blob)) or bool(EXAMPLE_API_HINT.search(message or ""))
+        # Don't treat incidental "cuda:0" in example.py Tracebacks as a driver mismatch.
+        if needs_example_api and re.search(r"unexpected keyword argument|TypeError:", err_blob, re.I):
+            needs_cuda = needs_cuda and bool(re.search(
+                r"driver|12080|cu130|cuda.*(error|fail|mismatch|unavailable)|torch\.(cuda|version)",
+                err_blob, re.I,
+            ))
         repaired_ok = False
+
+        if do_repair and needs_example_api:
+            reasoning.append("偵測到 example.py API／參數錯誤，自動套用修正到 Lab 編輯器")
+            yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+            current = context.get("code") or lesson.get("draft_code") or lesson.get("code", "")
+            fixed, note = fix_known_example_api_errors(current, err_blob, lesson_id=lesson.get("id") or "")
+            if fixed and fixed != current:
+                yield {"type": "tool_call", "name": "apply_code", "arguments": {"explanation": note}}
+                applied, events = self.agent.run_tool(
+                    uid, lesson, context, "apply_code",
+                    {"code": fixed, "explanation": note},
+                )
+                for e in events:
+                    yield e
+                yield {"type": "tool_result", "name": "apply_code", "result": self.agent.summarize(applied)}
+                if applied.get("ok") and applied.get("applied"):
+                    repaired_ok = True
+                    answer_parts.append(
+                        f"這是 **example.py API 用法錯誤**（不是 CUDA／importer 環境問題）。\n\n"
+                        f"已寫入中間 Lab 編輯器（黃線＝Hermes）：{note}"
+                    )
+                    cursor_prompt = cursor_prompt_for_example_api_fix(lesson, err_blob, note)
+                    answer_parts.append(
+                        "若要同步修正 store 課程檔（給 Cursor）：\n```text\n"
+                        + cursor_prompt
+                        + "\n```"
+                    )
+                else:
+                    answer_parts.append(f"自動套用 example.py 修正失敗：{applied.get('error') or applied}")
+            else:
+                cursor_prompt = cursor_prompt_for_example_api_fix(lesson, err_blob, "未能自動改寫；請依 Traceback 修正 API。")
+                answer_parts.append(
+                    "環境診斷正常，錯誤指向 **example.py**。我無法安全自動改寫這次的 API 差異；"
+                    "請用下方 Cursor prompt 改課程／store，或貼上你希望的完整 example.py。\n\n"
+                    f"```text\n{cursor_prompt}\n```"
+                )
 
         if do_repair and needs_cuda:
             reasoning.append("偵測到 CUDA/driver 不符，執行 repair_isaaclab_cuda")
@@ -1108,22 +1160,32 @@ class OfflineTutor:
             )
 
         if do_repair and repaired_ok:
-            reasoning.append("修復完成，自動重跑課程驗證")
-            yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
-            yield {"type": "tool_call", "name": "start_run", "arguments": {}}
-            rerun, events = self.agent.run_tool(uid, lesson, context, "start_run", {})
-            for e in events:
-                yield e
-            yield {"type": "tool_result", "name": "start_run", "result": self.agent.summarize(rerun)}
-            if rerun.get("ok"):
-                answer_parts.append(
-                    f"已自動重跑 `{rerun['run_id'][:8]}`（{rerun.get('runtime')}），狀態：{rerun.get('state')}。"
-                    + (f"\n\n{rerun['error']}" if rerun.get("error") else " 請看右側執行進度。")
-                )
+            code_now = context.get("code") or lesson.get("draft_code") or lesson.get("code") or ""
+            can_rerun = "launch_simulation" in code_now or "def main" in code_now
+            if can_rerun:
+                reasoning.append("修復完成，自動重跑課程驗證")
+                yield {"type": "reasoning", "text": reasoning[-1] + "\n"}
+                yield {"type": "tool_call", "name": "start_run", "arguments": {}}
+                rerun, events = self.agent.run_tool(uid, lesson, context, "start_run", {})
+                for e in events:
+                    yield e
+                yield {"type": "tool_result", "name": "start_run", "result": self.agent.summarize(rerun)}
+                if rerun.get("ok"):
+                    answer_parts.append(
+                        f"已自動重跑 `{rerun['run_id'][:8]}`（{rerun.get('runtime')}），狀態：{rerun.get('state')}。"
+                        + (f"\n\n{rerun['error']}" if rerun.get("error") else " 請看右側執行進度。")
+                    )
+                else:
+                    answer_parts.append(f"自動重跑失敗：{rerun.get('error')}")
             else:
-                answer_parts.append(f"自動重跑失敗：{rerun.get('error')}")
-        elif not needs_cuda and not needs_importers and not needs_physx:
-            answer_parts.append("若錯誤在 example.py，請貼出關鍵行或輸入 `/code <關鍵字>`；修好後用 `/run` 再跑一次。")
+                answer_parts.append("已寫入修正；請在 Lab 檢查黃線後按「執行」驗證。")
+        elif not needs_cuda and not needs_importers and not needs_physx and not needs_example_api:
+            answer_parts.append(
+                "若錯誤在 example.py，請說「請修復」讓我自動改並寫入中間編輯器，"
+                "或貼上完整 ```python```／輸入 `/edit`；修好後我會 `/run` 驗證。"
+            )
+        elif not repaired_ok and needs_example_api and not do_repair:
+            answer_parts.append("這是 example.py API 錯誤。輸入 `/fix` 或說「請修復」讓我改程式並寫入 Lab 編輯器。")
 
     @staticmethod
     def help_text(lesson, short=False):
@@ -1136,6 +1198,65 @@ class OfflineTutor:
                 "要加 log／改 example.py 請說「加上 log」或 `/edit`（會寫入中間編輯器並標註 Hermes）。"
             )
         return "\n".join(lines)
+
+
+def fix_known_example_api_errors(code: str, err_text: str, lesson_id: str = "") -> tuple[str, str]:
+    """Rewrite known Lab-3 API mismatches in example.py. Returns (code, note)."""
+    if not code:
+        return code, ""
+    text = code
+    notes: list[str] = []
+    err = err_text or ""
+
+    # NewtonCfg(solver_iterations=N) is invalid in Lab 3 — iterations live on MJWarpSolverCfg.
+    if (
+        "solver_iterations" in err
+        or "NewtonCfg" in err
+        or re.search(r"NewtonCfg\s*\(\s*solver_iterations\s*=", text)
+    ):
+        if re.search(r"NewtonCfg\s*\(\s*solver_iterations\s*=", text):
+            if "MJWarpSolverCfg" not in text:
+                text = re.sub(
+                    r"from isaaclab_newton\.physics import NewtonCfg\b",
+                    "from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg",
+                    text,
+                    count=1,
+                )
+                if "MJWarpSolverCfg" not in text:
+                    # Already imported NewtonCfg differently — inject a dedicated import.
+                    text = "from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg\n" + text
+            text2, n = re.subn(
+                r"NewtonCfg\s*\(\s*solver_iterations\s*=\s*([^)]+)\)",
+                r"NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=\1))",
+                text,
+            )
+            if n:
+                text = text2
+                notes.append(
+                    "NewtonCfg(solver_iterations=…) → NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=…))"
+                )
+
+    if text == code:
+        return code, ""
+    note = f"Hermes 修正 {lesson_id or 'example.py'} Lab 3 API：" + "；".join(notes)
+    return text, note
+
+
+def cursor_prompt_for_example_api_fix(lesson: dict, err_text: str, note: str) -> str:
+    lid = (lesson or {}).get("id") or "lesson"
+    title = (lesson or {}).get("title") or lid
+    err_snip = re.sub(r"\s+", " ", (err_text or "").strip())[:500]
+    return (
+        f"In q1_store_urdf, fix Isaac Lab 3 tutorial lesson `{lid}` ({title}).\n"
+        f"Runtime error from example.py:\n{err_snip}\n\n"
+        f"Hermes note: {note}\n\n"
+        "Update tutorials/lessons/<id>/example.py (and lesson.md if docs show the old API) so the "
+        "snippet matches the installed Isaac Lab 3 checkout under Q1_ISAACLAB3_ROOT. "
+        "For Newton MJWarp, use NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=N)) — not "
+        "NewtonCfg(solver_iterations=N). Keep the tutorial param key solver_iterations as the UI slider "
+        "that maps into MJWarpSolverCfg.iterations. After editing, restart the store "
+        "(bash scripts/restart_store.sh --port 8878) and re-run the lesson."
+    )
 
 
 def extract_fenced_python(text: str) -> str | None:

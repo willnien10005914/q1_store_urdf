@@ -13,7 +13,7 @@ from unittest import mock
 
 from q1store.agent import (
     Agent, OfflineTutor, TagStreamer, inject_progress_logging, EDIT_HINT, REPAIR_HINT,
-    apply_simple_code_intent, extract_fenced_python,
+    EXAMPLE_API_HINT, apply_simple_code_intent, extract_fenced_python, fix_known_example_api_errors,
 )
 from q1store.llm import LLMManager, MODELS
 from q1store.service import Store
@@ -146,7 +146,7 @@ class LlmTests(unittest.TestCase):
 
 class AgentTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.t = Tutorial(ROOT, self.temp.name, start_threads=False)
         self.uid = self.t.register_user("Fran")["user"]["id"]
         self.agent = Agent(self.t, llm=None)
@@ -256,6 +256,49 @@ class AgentTests(unittest.TestCase):
         self.assertIn("[hermes-log]", apply.get("code") or "")
         draft = self.t.progress_row(self.uid, lesson["id"]).get("draft_code") or ""
         self.assertIn("[hermes-log]", draft)
+
+    def test_fix_newtoncfg_solver_iterations_applies_code(self):
+        err = (
+            'File "example.py", line 45, in <module>\n'
+            "    sim_cfg.physics = NewtonCfg(solver_iterations=ITERS)\n"
+            "TypeError: NewtonCfg.__init__() got an unexpected keyword argument 'solver_iterations'\n"
+        )
+        self.assertTrue(EXAMPLE_API_HINT.search(err))
+        broken = (
+            "from isaaclab_newton.physics import NewtonCfg\n"
+            "sim_cfg.physics = NewtonCfg(solver_iterations=ITERS)\n"
+        )
+        fixed, note = fix_known_example_api_errors(broken, err, "l02-multi-backend-physics")
+        self.assertIn("MJWarpSolverCfg(iterations=ITERS)", fixed)
+        self.assertIn("NewtonCfg", note)
+        lesson = self.t.lesson("l02-multi-backend-physics", robot="leg", user_id=self.uid)
+        import uuid
+        run_id = uuid.uuid4().hex
+        directory = self.t.run_dir(run_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "run.log").write_text(err, encoding="utf-8")
+        run = {
+            "id": run_id, "user_id": self.uid, "lesson_id": lesson["id"], "lesson_title": "l02",
+            "robot": "leg", "params": {}, "code_sha256": "0" * 64, "code_modified": True,
+            "runtime": {"mode": "isaaclab3", "label": "Isaac Lab 3"}, "trainable": False, "resumable": False,
+            "state": "failed", "phase": None, "progress": None, "result": None,
+            "error": "exit code 1; 見 run.log", "pid": None,
+            "created_at": "2026-10-31T00:00:00Z", "started_at": "2026-10-31T00:00:00Z",
+            "finished_at": "2026-10-31T00:00:01Z", "resumed": 0,
+        }
+        self.t.put("runs", run, k1=self.uid, k2=lesson["id"])
+        events = list(self.agent.chat(
+            self.uid, lesson["id"], "請修復執行錯誤",
+            {"robot": "leg", "params": {}, "code": broken, "last_run": {
+                "id": run_id, "state": "failed", "error": "exit code 1; 見 run.log", "log_tail": err,
+            }},
+        ))
+        apply = next(e for e in events if e.get("type") == "code_apply")
+        self.assertIn("MJWarpSolverCfg", apply.get("code") or "")
+        tokens = "".join(e.get("text", "") for e in events if e.get("type") == "token")
+        self.assertIn("example.py API", tokens)
+        self.assertIn("q1_store_urdf", tokens)
+        self.assertNotIn("請貼出關鍵行", tokens)
 
     def test_any_coding_edit_applies_not_only_log(self):
         # 「修改」must be EDIT, not REPAIR (bare 修 used to steal these).

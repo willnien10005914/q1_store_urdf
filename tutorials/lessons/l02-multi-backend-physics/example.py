@@ -39,9 +39,9 @@ DT = float(P.get("dt", 0.005))
 ITERS = int(P.get("solver_iterations", 4))
 sim_cfg = SimulationCfg(dt=DT, device="cuda:0")
 if PHYSICS == "newton_mjwarp":
-    from isaaclab_newton.physics import NewtonCfg
-    # MuJoCo-Warp solver options live on the Newton cfg; iterations map to MuJoCo's solver iterations.
-    sim_cfg.physics = NewtonCfg(solver_iterations=ITERS)
+    # Lab 3: solver knobs live on MJWarpSolverCfg, not as NewtonCfg kwargs.
+    from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg
+    sim_cfg.physics = NewtonCfg(solver_cfg=MJWarpSolverCfg(iterations=ITERS))
 elif PHYSICS == "isaacsim_physx":
     from isaaclab_physx.physics import PhysxCfg
     sim_cfg.physics = PhysxCfg(max_position_iteration_count=ITERS, max_velocity_iteration_count=max(1, ITERS // 4))
