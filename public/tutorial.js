@@ -4,6 +4,7 @@ import {renderMarkdown} from './markdown.js';
 const USER_KEY = 'q1-tutorial-user';
 const ROBOT_KEY = 'q1-tutorial-robot';
 const LAYOUT_KEY = 'q1-tutorial-layout';
+const SIDE_FOLD_KEY = 'q1-tutorial-side-folds';
 const SIDE_MIN = 160;
 const SIDE_MAX = 480;
 const AGENT_MIN = 240;
@@ -22,6 +23,16 @@ function saveLayoutPrefs() {
     sideWidth: state.sideWidth,
     agentWidth: state.agentWidth,
   }));
+}
+function loadSideFolds() {
+  try {
+    return JSON.parse(localStorage.getItem(SIDE_FOLD_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+function saveSideFolds(folds) {
+  localStorage.setItem(SIDE_FOLD_KEY, JSON.stringify(folds));
 }
 let toastTimer;
 function toast(msg) {
@@ -464,9 +475,12 @@ function renderSidebar() {
   const nav = $('lesson-nav');
   if (!state.catalog) return;
   const prog = Object.fromEntries((state.progress?.lessons || []).map((l) => [l.lesson_id, l]));
+  const folds = loadSideFolds();
   nav.innerHTML = state.catalog.categories.map((cat) => {
     if (!cat.lessons?.length) return '';
-    return `<div class="tut-cat-label">${localeLabel(cat)}</div>` + cat.lessons.map((les) => {
+    const catKey = `cat:${cat.id || localeLabel(cat)}`;
+    const open = folds[catKey] !== false; // default expanded
+    const links = cat.lessons.map((les) => {
       const st = prog[les.id]?.state || 'not_started';
       const label = st === 'completed' ? (getLocale() === 'en' ? 'done' : '已完成')
         : st === 'in_progress' ? (getLocale() === 'en' ? 'in progress' : '進行中') : '';
@@ -475,11 +489,38 @@ function renderSidebar() {
         <span class="state">${label || (les.minutes ? les.minutes + ' min' : '')}</span>
       </a>`;
     }).join('');
+    return `<details class="tut-fold tut-fold-cat" data-fold="${escapeHtml(catKey)}"${open ? ' open' : ''}>
+      <summary>${localeLabel(cat)}</summary>
+      <div class="tut-fold-body">${links}</div>
+    </details>`;
   }).join('');
   nav.querySelectorAll('[data-lesson]').forEach((a) => a.addEventListener('click', (e) => {
     e.preventDefault();
     openLesson(a.dataset.lesson);
   }));
+  nav.querySelectorAll('details[data-fold]').forEach((el) => {
+    el.addEventListener('toggle', () => {
+      const next = loadSideFolds();
+      next[el.dataset.fold] = el.open;
+      saveSideFolds(next);
+    });
+  });
+}
+
+function wireSideFolds() {
+  const folds = loadSideFolds();
+  document.querySelectorAll('#sidebar details.tut-fold[data-fold]').forEach((el) => {
+    const key = el.dataset.fold;
+    if (!key || key.startsWith('cat:')) return; // category folds applied in renderSidebar
+    if (Object.prototype.hasOwnProperty.call(folds, key)) el.open = !!folds[key];
+    if (el.dataset.foldBound) return;
+    el.dataset.foldBound = '1';
+    el.addEventListener('toggle', () => {
+      const next = loadSideFolds();
+      next[key] = el.open;
+      saveSideFolds(next);
+    });
+  });
 }
 
 function bindMegaHover(root) {
@@ -1132,6 +1173,8 @@ function wire() {
     toast(getLocale()==='en'?'Draft saved':'草稿已存');
   });
   wireCodeEditor();
+  wirePaneResize();
+  wireSideFolds();
   $('run-btn').addEventListener('click', () => startRun().catch((e) => toast(e.message)));
   $('cancel-btn').addEventListener('click', async () => {
     if (!state.runId) return;

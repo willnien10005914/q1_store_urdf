@@ -76,6 +76,28 @@
 .tut-layout.is-code-focus .tut-pane-resize{display:none}
 .tut-side h2{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#8a8a92;margin:12px 0 8px}
 .tut-side h2:first-child{margin-top:0}
+.tut-fold{margin:10px 0 0;border:1px solid #eeeef3;border-radius:12px;background:#fafbfc;overflow:clip}
+.tut-fold>summary{
+  list-style:none;cursor:pointer;user-select:none;
+  display:flex;align-items:center;gap:8px;
+  padding:10px 12px;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#5c5c66;
+}
+.tut-fold>summary::-webkit-details-marker{display:none}
+.tut-fold>summary::before{
+  content:"";width:6px;height:6px;border-right:1.5px solid #8a8a92;border-bottom:1.5px solid #8a8a92;
+  transform:rotate(-45deg);transition:transform .15s ease;flex-shrink:0;margin-top:-1px;
+}
+.tut-fold[open]>summary::before{transform:rotate(45deg);margin-top:-2px}
+.tut-fold>summary:active{transform:translateY(1px)}
+.tut-fold-body{padding:0 8px 10px}
+.tut-fold-cat{border:0;background:transparent;border-radius:0;margin:4px 0 0}
+.tut-fold-cat>summary{
+  text-transform:none;letter-spacing:.3px;font-weight:600;font-size:10px;color:#8a8a92;
+  padding:6px 8px;border-radius:8px;
+}
+.tut-fold-cat>summary:hover{background:#f0f2f7}
+.tut-fold-cat .tut-fold-body{padding:0 0 4px}
+.tut-discovery{padding:4px 4px 2px;font-size:11px}
 .tut-lesson-link{display:block;padding:9px 10px;border-radius:10px;font-size:12px;line-height:1.4;color:#333;border:1px solid transparent}
 .tut-lesson-link:hover{background:#f5f7fb}
 .tut-lesson-link.active{background:#f3f8ff;border-color:#cfe0f7;color:var(--blue)}
@@ -179,13 +201,13 @@
 .tut-compose .row{display:flex;gap:8px;align-items:center}
 .tut-compose .hint{font-size:9px;color:#8a8a92;line-height:1.4}
 
-.tut-llm{margin-top:12px;padding:12px;border:1px solid #eeeef3;border-radius:12px;background:#fafbfc}
+.tut-llm{padding:2px 2px 0}
 .tut-llm h3{margin:0 0 8px;font-size:12px}
 .tut-model{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-top:1px solid #f0f0f3;font-size:11px}
 .tut-model:first-of-type{border-top:0}
 .tut-model .row{display:flex;justify-content:space-between;gap:8px;align-items:center}
 .tut-model progress{width:100%;height:4px}
-.tut-proposals{margin-top:12px}
+.tut-proposals{margin-top:0}
 .tut-proposals .item{padding:10px;border:1px solid #eeeef3;border-radius:10px;margin-bottom:8px;font-size:11px}
 .tut-proposals .item strong{display:block;margin-bottom:4px}
 .tut-proposals .item .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
