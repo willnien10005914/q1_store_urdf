@@ -109,6 +109,7 @@ EXAMPLE_API_HINT = re.compile(
     r"observation group 'policy'.*NaN|contains NaN values|"
     r"|too many values to unpack \(expected 2\)|"
     r"|File \"example\.py\"|"
+    r"|unexpected keyword argument ['\"]duplicate_physics['\"]|"
     r"Isaac Sim is not installed|PhysX backend and Kit visualizer currently requires Isaac Sim",
     re.I,
 )
@@ -1332,6 +1333,8 @@ def heal_stale_example_draft(
     elif lid.startswith("l06") and "OnPolicyRunner" in code and "njmax" not in code and "MJWarpSolverCfg" in (canonical_code or ""):
         # Any l06 draft that never got the locomotion-capacity NewtonCfg.
         synth.append("nefc overflow - please increase njmax to 1000\ncontains NaN values")
+    if "duplicate_physics" in code and (lid.startswith("l09") or "HardwareSceneCfg" in code):
+        synth.append("TypeError: HardwareSceneCfg.__init__() got an unexpected keyword argument 'duplicate_physics'")
     if "VisualizerCfg(kind=" in code or "sim_cfg.visualizers" in code:
         synth.append("TypeError: VisualizerCfg.__init__() got an unexpected keyword argument 'kind'")
     if "RslRlPpoActorCriticCfg" in code or (
@@ -1513,16 +1516,31 @@ def fix_known_example_api_errors(
             )
             return _ship_canonical(canon, lid, notes)
 
+    # InteractiveSceneCfg: duplicate_physics was renamed/removed — Lab 3 uses replicate_physics.
+    if (
+        "duplicate_physics" in text
+        and re.search(r"unexpected keyword argument ['\"]duplicate_physics['\"]", err, re.I)
+    ):
+        text2, n = re.subn(
+            r",\s*duplicate_physics\s*=\s*(?:True|False)",
+            "",
+            text,
+        )
+        if n:
+            text = text2
+            notes.append("移除 duplicate_physics=…（Isaac Lab 3 InteractiveSceneCfg 已無此參數；預設 replicate_physics=True）")
+
     # Generic: example.py TypeError/KeyError/AttributeError and the lesson file is newer — ship it.
     if (
         canon_newer()
         and re.search(r"File \"example\.py\"", err)
         and re.search(r"TypeError:|KeyError:|AttributeError:|unexpected keyword", err, re.I)
         and (
-            lid.startswith(("l02", "l04", "l06", "l07", "l08"))
+            lid.startswith(("l02", "l04", "l06", "l07", "l08", "l09"))
             or "OnPolicyRunner" in text
             or "VisualizerCfg" in text
             or "NewtonCfg" in text
+            or "duplicate_physics" in text
         )
     ):
         notes.append("課程最新 example.py（對齊已安裝 Isaac Lab 3 API）")

@@ -136,6 +136,19 @@
 .tut-lab{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(220px,.85fr);gap:14px;align-items:stretch;transition:grid-template-columns .2s ease}
 .tut-lab.is-editing{grid-template-columns:minmax(0,1.85fr) minmax(200px,.7fr)}
 .tut-lab.is-wide{grid-template-columns:minmax(0,1fr) minmax(200px,280px)}
+.tut-lab.is-code-collapsed{grid-template-columns:minmax(0,52px) minmax(0,1fr);gap:10px}
+.tut-lab.is-code-collapsed .tut-code-wrap{position:relative;min-width:0;overflow:hidden}
+.tut-lab.is-code-collapsed .tut-code-editor,
+.tut-lab.is-code-collapsed .tut-code-hint,
+.tut-lab.is-code-collapsed .tut-code-resize,
+.tut-lab.is-code-collapsed .tut-code-legend,
+.tut-lab.is-code-collapsed #code-widen,
+.tut-lab.is-code-collapsed #code-focus,
+.tut-lab.is-code-collapsed #code-reset,
+.tut-lab.is-code-collapsed #code-save{display:none!important}
+.tut-lab.is-code-collapsed .tut-code-toolbar{flex-direction:column;align-items:stretch;gap:6px;padding:8px 6px;writing-mode:horizontal-tb}
+.tut-lab.is-code-collapsed .tut-code-toolbar strong{display:none}
+.tut-lab.is-code-collapsed #code-collapse{writing-mode:vertical-rl;text-orientation:mixed;letter-spacing:.08em;padding:10px 4px;min-height:120px;justify-content:center}
 .tut-code-wrap{display:flex;flex-direction:column;gap:8px;min-width:0;position:relative;width:100%}
 .tut-code-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .tut-code-toolbar strong{font-size:12px}
@@ -236,6 +249,8 @@
 .hw-studio-head .muted,.hw-hint.muted,.hw-ref-cap{font-size:11px;color:#8a8a92}
 .hw-studio-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(180px,.8fr);gap:12px}
 .hw-stage{height:280px;border-radius:10px;overflow:hidden;background:#eef1f5;border:1px solid #e2e5eb}
+.tut-lab.is-code-collapsed .hw-stage{height:min(58vh,520px)}
+.tut-lab.is-code-collapsed .hw-ref{max-height:220px}
 .hw-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .hw-actions .button{font-size:11px;min-height:32px;padding:6px 12px}
 .hw-ref{width:100%;border-radius:10px;background:#111;max-height:160px;object-fit:cover}
@@ -249,6 +264,11 @@
   .tut-layout.is-code-focus{grid-template-columns:minmax(0,1fr)}
   .tut-side,.tut-agent{position:static;max-height:none}
   .tut-lab,.tut-lab.is-editing,.tut-lab.is-wide{grid-template-columns:1fr}
+  .tut-lab.is-code-collapsed{grid-template-columns:1fr}
+  .tut-lab.is-code-collapsed .tut-code-wrap{order:2}
+  .tut-lab.is-code-collapsed .tut-code-toolbar{flex-direction:row;align-items:center}
+  .tut-lab.is-code-collapsed #code-collapse{writing-mode:horizontal-tb;min-height:32px;padding:6px 12px}
+  .tut-lab.is-code-collapsed .hw-stage{height:min(48vh,420px)}
   .tut-code-resize,.tut-pane-resize{display:none}
   .tut-restore-dock{left:12px;right:12px;transform:none;justify-content:space-between}
   .tut-rollout-stage{height:220px}

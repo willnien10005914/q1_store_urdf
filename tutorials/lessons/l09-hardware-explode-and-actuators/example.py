@@ -218,7 +218,8 @@ with launch_simulation(sim_cfg):
             actuators=actuators,
         )
 
-    scene = InteractiveScene(HardwareSceneCfg(num_envs=int(P.get("num_envs", 16)), env_spacing=2.5, duplicate_physics=True))
+    # Isaac Lab 3 InteractiveSceneCfg uses replicate_physics (default True); duplicate_physics was removed.
+    scene = InteractiveScene(HardwareSceneCfg(num_envs=int(P.get("num_envs", 16)), env_spacing=2.5))
     robot: Articulation = scene["robot"]
     pd_ids = robot.actuators["pd"].joint_indices
     steps = int(float(P.get("sim_seconds", 3.0)) / DT)

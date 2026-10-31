@@ -72,26 +72,39 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
     }
     return api;
   }
+  /** Keep the lowest mesh point on the grid (z=0) so feet rest on the ground plane. */
+  function plantFeetOnGround(){
+    if(!robot)return;
+    robot.updateMatrixWorld(true);
+    bounds.setFromObject(robot);
+    if(bounds.isEmpty()||!Number.isFinite(bounds.min.z))return;
+    robot.position.z-=bounds.min.z;
+    robot.updateMatrixWorld(true);
+  }
   function fit(){
     if(!robot)return;robot.updateMatrixWorld(true);bounds.setFromObject(robot);
     const size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3());
-    const height=Math.max(.5,size.z);target.set(center.x,center.y,center.z);
-    const distance=Math.max(height,size.x/Math.max(.5,camera.aspect))/(2*Math.tan(camera.fov*Math.PI/360)*.77);
-    const direction=new THREE.Vector3(1,-1.7,.48).normalize();
-    controls.target.copy(target);camera.position.copy(direction.multiplyScalar(distance).add(center));controls.update();
+    const height=Math.max(.5,size.z);
+    // Aim near mid-torso but bias up from the feet so the ground line sits in the lower frame.
+    target.set(center.x,center.y,bounds.min.z+height*0.42);
+    const distance=Math.max(height,size.x/Math.max(.5,camera.aspect))/(2*Math.tan(camera.fov*Math.PI/360)*.72);
+    const direction=new THREE.Vector3(1.05,-1.65,.42).normalize();
+    controls.target.copy(target);camera.position.copy(direction.multiplyScalar(distance).add(target));controls.update();
     onMetrics({height_m:size.z,width_m:size.x,depth_m:size.y,joints:Object.values(robot.joints).filter(j=>j.jointType!=='fixed').length});
   }
   function disposeModel(model){const geometries=new Set(),materials=new Set();model?.traverse(o=>{if(o.geometry&&!geometries.has(o.geometry)){o.geometry.dispose();geometries.add(o.geometry);}for(const m of (Array.isArray(o.material)?o.material:[o.material]))if(m&&!materials.has(m)){m.dispose();materials.add(m);}});}
   function resize(){const width=container.clientWidth,height=container.clientHeight;hasSize=width>0&&height>0;if(!hasSize){last=0;return;}renderer.setSize(width,height,false);camera.aspect=width/height;camera.updateProjectionMatrix();}
   const observer=new ResizeObserver(resize);observer.observe(container);resize();
   const visibilityObserver=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;last=0;});visibilityObserver.observe(container);
-  function setJoints(values={}){
+  function setJoints(values={},{plant=true}={}){
     if(!robot)return api;
     for(const [name,value]of Object.entries(values)){
       const j=robot.joints[name];if(!j||j.mimicJoint||!Number.isFinite(value))continue;
       const lower=Number.isFinite(j.limit?.lower)?j.limit.lower:-Infinity,upper=Number.isFinite(j.limit?.upper)?j.limit.upper:Infinity;
       robot.setJointValue(name,j.jointType==='continuous'?value:THREE.MathUtils.clamp(value,lower,upper));
     }
+    // Re-plant after every pose change so feet stay on the ground (homepage + tutorial).
+    if(plant&&explodeAmount<=0.02)plantFeetOnGround();
     return api;
   }
   function demoPose(t){
@@ -143,12 +156,14 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       modelMaterial=new THREE.MeshStandardMaterial({color:0x8492a4,roughness:.56,metalness:.25});
       robot.traverse(o=>{if(o.isMesh){for(const m of(Array.isArray(o.material)?o.material:[o.material]))if(m)oldMaterials.add(m);o.material=modelMaterial;o.castShadow=false;o.receiveShadow=false;}});
       oldMaterials.forEach(m=>m.dispose());
+      robot.position.set(0,0,0);
       captureLinkBases();
       clearAccessories();
-      setJoints(demoPose(0));robot.updateMatrixWorld(true);bounds.setFromObject(robot);
+      setJoints(demoPose(0),{plant:true});
+      robot.updateMatrixWorld(true);bounds.setFromObject(robot);
       if(bounds.isEmpty()||!Number.isFinite(bounds.min.z)||!Number.isFinite(bounds.max.z))throw new Error(tr('原生模型的 mesh 或姿態範圍無效。','Native model mesh or pose bounds are invalid.'));
-      robot.position.z-=bounds.min.z;
       applyExplode(explodeAmount);
+      plantFeetOnGround();
       fit();const remain=Math.max(0,450-(performance.now()-shownAt));if(remain)await new Promise(resolve=>setTimeout(resolve,remain));if(disposed||token!==loadToken)return api;container.querySelectorAll('.loading-model').forEach(element=>element.remove());renderer.render(scene,camera);container.dataset.modelReady='true';container.dataset.robotType=entry.id;container.dataset.meshCount=String(meshLoads.length);onStatus(`${entry.name||entry.label||entry.id} · ${tr('原生 URDF 幾何預覽','native URDF geometry preview')}`);return api;
     }catch(error){if(loaded){scene.remove(loaded);disposeModel(loaded);if(loaded===robot)robot=null;}onStatus(tr('模型載入失敗：','Model load failed: ')+error.message);throw error;}
   }
@@ -187,8 +202,10 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
   function applyExplode(amount=0){
     explodeAmount=Math.max(0,Math.min(1,Number(amount)||0));
     if(!robot?.links||!linkBase.size)return api;
+    // Reset root height before measuring directions so offsets stay stable.
+    robot.position.z=0;
     robot.updateMatrixWorld(true);
-    const root=robot.links.center_hip_link||robot.links.center_torso_link||Object.values(robot.links)[0];
+    const root=robot.links.center_torso_link||robot.links.center_hip_link||Object.values(robot.links)[0];
     const rootWorld=new THREE.Vector3();
     root?.getWorldPosition(rootWorld);
     const tmp=new THREE.Vector3();
@@ -196,12 +213,16 @@ export async function createRobotViewer(container,{onStatus=()=>{},onMetrics=()=
       const base=linkBase.get(name);if(!base)continue;
       link.getWorldPosition(tmp);
       const dir=tmp.clone().sub(rootWorld);
-      if(dir.lengthSq()<1e-8)dir.set(0,0,0.15);
+      // Prefer lateral / upward separation so feet are not driven under the ground plane.
+      if(dir.z<0)dir.z*=0.2;
+      dir.z+=0.12*Math.max(0,explodeAmount);
+      if(dir.lengthSq()<1e-8)dir.set(0,0,0.2);
       else dir.normalize();
-      // Push parts outward in local parent space approximately via world delta projected.
       const push=dir.multiplyScalar(explodeAmount*0.55);
       link.position.set(base.x+push.x,base.y+push.y,base.z+push.z);
     }
+    // Assembled: feet on ground. Exploded: keep the lowest piece on the grid.
+    plantFeetOnGround();
     return api;
   }
   function animateExplode(to=0.85,{duration=1.2,from=explodeAmount}={}){

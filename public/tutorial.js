@@ -72,6 +72,7 @@ const state = {
   codeMarks: {}, // lineIndex -> {source:'manual'|'hermes'|'note', note?}
   codeEditTimer: null,
   codeWide: false,   // widen code vs params inside .tut-lab
+  codeCollapsed: false, // hide/minimize example.py so Lab / hardware studio can grow
   codeFocus: false,  // hide left lesson nav + right Hermes (full-bleed code)
   sideWidth: Number(loadLayoutPrefs().sideWidth) || SIDE_DEFAULT,
   agentWidth: Number(loadLayoutPrefs().agentWidth) || AGENT_DEFAULT,
@@ -204,23 +205,38 @@ function syncLayoutChrome() {
   // Do NOT key layout off document.activeElement === code: clicking「執行」blurs the
   // textarea first, which used to snap the three-pane layout and swallow the click
   // (users had to press Run twice). Only explicit widen / focus modes change chrome.
-  const editing = state.codeWide || state.codeFocus;
+  const editing = (state.codeWide || state.codeFocus) && !state.codeCollapsed;
   const lab = labEl();
   const page = pageEl();
   const layout = layoutEl();
   lab?.classList.toggle('is-editing', editing);
-  lab?.classList.toggle('is-wide', state.codeWide || state.codeFocus);
+  lab?.classList.toggle('is-wide', (state.codeWide || state.codeFocus) && !state.codeCollapsed);
+  lab?.classList.toggle('is-code-collapsed', !!state.codeCollapsed);
   // Widen middle code without hiding sidebars; focus is the only mode that collapses them.
   page?.classList.toggle('is-code-editing', editing && !state.codeFocus);
   page?.classList.toggle('is-code-focus', state.codeFocus);
+  page?.classList.toggle('is-code-collapsed', !!state.codeCollapsed);
   layout?.classList.toggle('is-code-editing', editing && !state.codeFocus);
   layout?.classList.toggle('is-code-focus', state.codeFocus);
   document.body.classList.toggle('tut-code-focus', state.codeFocus);
-  if (!state.codeWide && !state.codeFocus && lab) lab.style.removeProperty('grid-template-columns');
+  if (!state.codeWide && !state.codeFocus && !state.codeCollapsed && lab) {
+    lab.style.removeProperty('grid-template-columns');
+  }
   applyPaneWidths();
 
+  const collapseBtn = $('code-collapse');
+  if (collapseBtn) {
+    collapseBtn.textContent = state.codeCollapsed
+      ? (getLocale() === 'en' ? 'Show code' : '展開程式')
+      : (getLocale() === 'en' ? 'Collapse code' : '收合程式');
+    collapseBtn.title = state.codeCollapsed
+      ? (getLocale() === 'en' ? 'Show example.py beside the Lab panel' : '展開 example.py（與練習區並排）')
+      : (getLocale() === 'en' ? 'Hide example.py so the Lab / hardware studio can grow' : '收合 example.py，放大練習／硬體工作室');
+    collapseBtn.setAttribute('aria-pressed', state.codeCollapsed ? 'true' : 'false');
+  }
   const widenBtn = $('code-widen');
   if (widenBtn) {
+    widenBtn.hidden = !!state.codeCollapsed;
     widenBtn.textContent = state.codeWide
       ? (getLocale() === 'en' ? 'Narrow code' : '縮回程式區')
       : (getLocale() === 'en' ? 'Widen code' : '加寬程式區');
@@ -231,6 +247,7 @@ function syncLayoutChrome() {
   }
   const focusBtn = $('code-focus');
   if (focusBtn) {
+    focusBtn.hidden = !!state.codeCollapsed;
     focusBtn.textContent = state.codeFocus
       ? (getLocale() === 'en' ? 'Show side panels' : '顯示左右欄')
       : (getLocale() === 'en' ? 'Focus' : '專注');
@@ -241,7 +258,10 @@ function syncLayoutChrome() {
   }
   const dock = $('layout-restore-dock');
   if (dock) dock.hidden = !state.codeFocus;
-  requestAnimationFrame(() => syncCodeChrome());
+  requestAnimationFrame(() => {
+    syncCodeChrome();
+    state.hardwareStudio?.refresh?.();
+  });
 }
 
 function wirePaneResize() {
@@ -307,9 +327,21 @@ function setCodeExpanded(on) {
   syncLayoutChrome();
 }
 
+function setCodeCollapsed(on) {
+  state.codeCollapsed = !!on;
+  if (state.codeCollapsed) {
+    state.codeWide = false;
+    state.codeFocus = false;
+  }
+  syncLayoutChrome();
+}
+
 function setCodeWide(on) {
   state.codeWide = !!on;
-  if (state.codeWide) state.codeFocus = false;
+  if (state.codeWide) {
+    state.codeFocus = false;
+    state.codeCollapsed = false;
+  }
   syncLayoutChrome();
 }
 
@@ -317,6 +349,7 @@ function setCodeFocus(on) {
   state.codeFocus = !!on;
   if (state.codeFocus) {
     state.codeWide = true;
+    state.codeCollapsed = false;
     document.querySelectorAll('.tut-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'lab'));
     document.querySelectorAll('.tut-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === 'lab'));
   }
@@ -502,6 +535,7 @@ function wireCodeEditor() {
       onCodeInput();
     }
   });
+  $('code-collapse')?.addEventListener('click', () => setCodeCollapsed(!state.codeCollapsed));
   $('code-widen')?.addEventListener('click', () => {
     setCodeWide(!state.codeWide);
     if (state.codeWide) $('code')?.focus({preventScroll: true});
@@ -512,6 +546,7 @@ function wireCodeEditor() {
   if (handle) {
     let dragging = false;
     handle.addEventListener('pointerdown', (e) => {
+      if (state.codeCollapsed) return;
       dragging = true;
       // Drag only resizes code vs params inside the lab — never hide page sidebars.
       state.codeWide = true;
@@ -764,8 +799,13 @@ async function openLesson(id) {
   $('lesson-md').innerHTML = renderMarkdown(lesson.markdown || '');
   state.codeWide = false;
   state.codeFocus = false;
+  // Hardware / explode studio needs space — collapse example.py by default on l09.
+  const preferCollapse = lesson?.id === 'l09-hardware-explode-and-actuators'
+    || lesson?.category === 'hardware';
+  state.codeCollapsed = !!preferCollapse;
   setCode(lesson.draft_code || lesson.code || '', {baseline: true});
   setCodeExpanded(false);
+  syncLayoutChrome();
   if (lesson.draft_healed) {
     toast(getLocale() === 'en'
       ? ('Updated stale example.py: ' + String(lesson.draft_healed).slice(0, 120))
