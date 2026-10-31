@@ -3,18 +3,24 @@
 #   bash scripts/setup_store.sh
 #   bash scripts/start_store.sh --port 8878
 #   bash scripts/start_store.sh --port 8878 --no-hermes   # web only
+#   bash scripts/start_store.sh --port 8878 --with-worker # also start GPU training worker
+# GPU worker auto-starts when NVIDIA + q1_leg_urdf are present unless --no-worker.
 set -euo pipefail
 
 Q1_STORE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${Q1_STORE_ENV_FILE:-$Q1_STORE_ROOT/.data/store.env}"
 # Hermes is the default companion service; opt out with --no-hermes.
 WITH_HERMES="${Q1_STORE_WITH_HERMES:-1}"
+# Empty = auto (start worker when NVIDIA GPU + leg checkout look ready).
+WITH_WORKER="${Q1_STORE_WITH_WORKER:-}"
 PASS_ARGS=()
 
 for arg in "$@"; do
   case "$arg" in
     --with-hermes) WITH_HERMES=1 ;;
     --no-hermes) WITH_HERMES=0 ;;
+    --with-worker) WITH_WORKER=1 ;;
+    --no-worker) WITH_WORKER=0 ;;
     --setup)
       bash "$Q1_STORE_ROOT/scripts/setup_store.sh"
       ;;
@@ -93,6 +99,101 @@ if [[ "$WITH_HERMES" -eq 1 ]]; then
   start_hermes || exit 1
 else
   echo "skipping Hermes (--no-hermes)"
+fi
+
+resolve_leg_root() {
+  local cand
+  for cand in \
+    "${Q1_LEG_ROOT:-}" \
+    "$HOME/projects/q1_leg_urdf" \
+    "$HOME/will/q1_leg_urdf" \
+    "$HOME/q1_leg_urdf" \
+    "$Q1_STORE_ROOT/../q1_leg_urdf"
+  do
+    [[ -n "$cand" && -f "$cand/scripts/isaac_env.sh" ]] || continue
+    printf '%s\n' "$(cd -- "$cand" && pwd)"
+    return 0
+  done
+  return 1
+}
+
+worker_ready() {
+  local data="${Q1_STORE_DATA:-$Q1_STORE_ROOT/.data}"
+  local beat="$data/worker/heartbeat.json"
+  [[ -f "$beat" ]] || return 1
+  "$Q1_STORE_PYTHON" - "$beat" <<'PY'
+import json, sys, time
+path = sys.argv[1]
+try:
+    beat = json.loads(open(path).read())
+except Exception:
+    raise SystemExit(1)
+age = time.time() - float(beat.get("updated_at") or 0)
+raise SystemExit(0 if age < 45 and beat.get("state") != "stopped" else 1)
+PY
+}
+
+start_worker() {
+  local data="${Q1_STORE_DATA:-$Q1_STORE_ROOT/.data}"
+  local log="$data/worker.log"
+  local leg
+  if ! leg="$(resolve_leg_root)"; then
+    echo "GPU worker skipped: Q1_LEG_ROOT / q1_leg_urdf with scripts/isaac_env.sh not found" >&2
+    return 0
+  fi
+  export Q1_LEG_ROOT="$leg"
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "GPU worker skipped: nvidia-smi not found (CPU-only / remote web host)" >&2
+    return 0
+  fi
+  mkdir -p "$data"
+  if worker_ready; then
+    echo "GPU worker already online (Q1_LEG_ROOT=$Q1_LEG_ROOT)"
+    return 0
+  fi
+  # Drop a stale heartbeat so the UI does not show a ghost worker while we boot.
+  rm -f "$data/worker/heartbeat.json"
+  echo "starting GPU worker (Q1_LEG_ROOT=$Q1_LEG_ROOT)…"
+  nohup bash "$Q1_STORE_ROOT/scripts/worker.sh" --data-dir "$data" \
+    >"$log" 2>&1 &
+  echo "GPU worker pid $! — log $log"
+  for _ in $(seq 1 20); do
+    if worker_ready; then
+      echo "GPU worker ready"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "GPU worker did not publish a heartbeat yet — see $log" >&2
+  return 0
+}
+
+should_start_worker() {
+  if [[ "$WITH_WORKER" == "1" ]]; then
+    return 0
+  fi
+  if [[ "$WITH_WORKER" == "0" ]]; then
+    return 1
+  fi
+  # Auto: NVIDIA present and leg checkout resolvable.
+  command -v nvidia-smi >/dev/null 2>&1 || return 1
+  resolve_leg_root >/dev/null || return 1
+  return 0
+}
+
+if should_start_worker; then
+  start_worker || true
+else
+  echo "skipping GPU worker (pass --with-worker to force, or set Q1_STORE_WITH_WORKER=1)"
+fi
+
+# Persist discovered leg root for later restarts / worker-only shells.
+if leg="$(resolve_leg_root 2>/dev/null)"; then
+  export Q1_LEG_ROOT="$leg"
+  if [[ -f "$ENV_FILE" ]] && ! grep -q '^Q1_LEG_ROOT=' "$ENV_FILE" 2>/dev/null; then
+    printf 'Q1_LEG_ROOT=%s\n' "$leg" >>"$ENV_FILE"
+    echo "appended Q1_LEG_ROOT to $ENV_FILE"
+  fi
 fi
 
 exec "$Q1_STORE_PYTHON" "$Q1_STORE_ROOT/server.py" "${PASS_ARGS[@]}"

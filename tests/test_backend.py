@@ -449,7 +449,7 @@ ffmpeg -y -f lavfi -i testsrc=size=64x64:rate=10:duration=6 -c:v libx264 -pix_fm
         motion_id = self.store.create_motion(exported)["id"]
         job = self.store.create_job(self.payload(mode="worker", motion_id=motion_id))
         self.assertTrue(job["training"]["trainable"])
-        self.assertEqual(job["stage_label"], "等待 Spark GPU worker")
+        self.assertEqual(job["stage_label"], "等待 GPU worker")
         self.assertEqual(job["training"]["queue_position"], 1)
         worker = Worker(self.root, leg_root=self.root, num_envs=64, clock=lambda: self.now)
         self.assertEqual([j["id"] for j in worker.pending()], [job["id"]])

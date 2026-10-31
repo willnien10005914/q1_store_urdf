@@ -42,7 +42,7 @@ if [[ "$has_port" -eq 0 ]]; then
   START_ARGS=(--port "$PORT" "${START_ARGS[@]+"${START_ARGS[@]}"}")
 fi
 
-echo "stopping store on :${PORT} and Hermes on :${LLM_PORT}…"
+echo "stopping store on :${PORT}, Hermes on :${LLM_PORT}, and GPU worker…"
 kill_port() {
   local port="$1"
   local pids=""
@@ -64,8 +64,12 @@ pkill -f "${Q1_STORE_ROOT}/server.py" >/dev/null 2>&1 || true
 pkill -f "server.py --port ${PORT}" >/dev/null 2>&1 || true
 pkill -f "${Q1_STORE_ROOT}/scripts/hermes_server.sh" >/dev/null 2>&1 || true
 pkill -f "llama_cpp.server .*--port ${LLM_PORT}" >/dev/null 2>&1 || true
+pkill -f "${Q1_STORE_ROOT}/scripts/worker.sh" >/dev/null 2>&1 || true
+pkill -f "python.*-m q1store.worker" >/dev/null 2>&1 || true
 pkill -f "a.pinggy.io" >/dev/null 2>&1 || true
 pkill -f "${Q1_STORE_ROOT}/scripts/pinggy.sh" >/dev/null 2>&1 || true
+# Clear stale heartbeat so the UI does not show a ghost online worker.
+rm -f "${Q1_STORE_DATA:-$Q1_STORE_ROOT/.data}/worker/heartbeat.json"
 kill_port "$PORT"
 kill_port "$LLM_PORT"
 sleep 1

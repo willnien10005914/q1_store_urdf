@@ -151,11 +151,12 @@ Q1_YTDLP="$PWD/.venv/bin/yt-dlp" Q1_STORE_PYTHON=.venv/bin/python bash scripts/s
 下載限制、登入／地區與網站變更仍可能造成失敗，此時可上傳有權使用的影片。
 YouTube 嵌入播放器只能預覽；要執行 MediaPipe，必須取得可讀影格的實際影片檔。
 
-### 選裝 Spark GPU 訓練 worker
+### 選裝本機 GPU 訓練 worker
 
 ```bash
-# 另一個終端（或 tmux）；預設 Q1_LEG_ROOT=$HOME/will/q1_leg_urdf
-Q1_WORKER_NUM_ENVS=2048 bash scripts/worker.sh --data-dir .data
+# 另一個終端（或 tmux）；亦會由 start_store.sh 在偵測到 NVIDIA + q1_leg_urdf 時自動啟動
+# 自動尋找 ~/projects/q1_leg_urdf、~/will/q1_leg_urdf 或 Q1_LEG_ROOT
+bash scripts/worker.sh --data-dir .data
 ```
 
 worker 透過 `q1_leg_urdf/scripts/isaac_env.sh` 找到 Isaac Sim Python，依序處理
