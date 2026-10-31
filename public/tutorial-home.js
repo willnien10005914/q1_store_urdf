@@ -30,17 +30,17 @@ function ensureStyles() {
 
 function injectNavLink() {
   const nav = document.querySelector('header.nav nav');
-  if (!nav || document.getElementById('nav-tutorial-mega')) return;
-  const wrap = document.createElement('div');
-  wrap.className = 'nav-mega';
-  wrap.id = 'nav-tutorial-mega';
-  // Same plain nav style as Specs / Studio / SDK — only CES keeps the red light.
-  wrap.innerHTML = `<a href="/tutorial" id="nav-tutorial-link" data-i18n="nav_school">${t('nav_school')}</a>
-    <div class="nav-mega-panel" id="mega-panel" hidden></div>`;
+  if (!nav || document.getElementById('nav-tutorial-link')) return;
+  // Plain link only — no mega dropdown; CES alone keeps the red light.
+  const link = document.createElement('a');
+  link.href = '/tutorial';
+  link.id = 'nav-tutorial-link';
+  link.dataset.i18n = 'nav_school';
+  link.textContent = t('nav_school');
   const sdk = nav.querySelector('#nav-sdk') || nav.querySelector('a[href="#sdk"]');
-  if (sdk) sdk.insertAdjacentElement('afterend', wrap);
-  else nav.appendChild(wrap);
-  applyI18n(wrap);
+  if (sdk) sdk.insertAdjacentElement('afterend', link);
+  else nav.appendChild(link);
+  applyI18n(link);
 }
 
 function injectTicker() {
@@ -53,45 +53,6 @@ function injectTicker() {
   const announcement = document.querySelector('.announcement');
   if (announcement) announcement.insertAdjacentElement('afterend', bar);
   else document.querySelector('header.nav')?.insertAdjacentElement('afterend', bar);
-}
-
-function bindMegaHover(mega) {
-  if (!mega || mega.dataset.boundHover) return;
-  mega.dataset.boundHover = '1';
-  let closeTimer = 0;
-  const open = () => { clearTimeout(closeTimer); mega.classList.add('is-open'); };
-  const scheduleClose = () => {
-    clearTimeout(closeTimer);
-    closeTimer = setTimeout(() => mega.classList.remove('is-open'), 280);
-  };
-  mega.addEventListener('pointerenter', open);
-  mega.addEventListener('pointerleave', scheduleClose);
-  mega.addEventListener('focusin', open);
-  mega.addEventListener('focusout', (e) => { if (!mega.contains(e.relatedTarget)) scheduleClose(); });
-  const trigger = mega.querySelector(':scope > a');
-  trigger?.addEventListener('click', (e) => {
-    if (!mega.classList.contains('is-open')) {
-      e.preventDefault();
-      open();
-    }
-  });
-}
-
-function renderMega(catalog, robot) {
-  const panel = document.getElementById('mega-panel');
-  if (!panel || !catalog) return;
-  panel.hidden = false;
-  panel.innerHTML = `<div class="nav-mega-inner">
-    <div class="nav-mega-head"><strong>${escapeHtml(t('nav_school_mega'))}</strong>
-    <div class="robot-toggle">${['leg','wheel'].map((r) =>
-      `<a class="button secondary" style="font-size:11px;min-height:28px;padding:4px 10px${robot===r?';background:#fff;box-shadow:0 1px 3px #0001':''}" href="/tutorial?robot=${r}">${r==='leg'?'雙足':'雙輪'}</a>`).join('')}</div></div>
-    <div class="nav-mega-grid">${(catalog.categories||[]).map((cat) => `<div>
-      <p class="nav-mega-cat">${escapeHtml(localeLabel(cat))}</p>
-      ${(cat.lessons||[]).map((les) => `<a class="nav-mega-card" href="/tutorial#${les.id}"><strong>${escapeHtml(localeTitle(les))}</strong><small>${escapeHtml((getLocale()==='en'?les.summary_en:les.summary)||'').slice(0,90)}</small></a>`).join('')||'<small>—</small>'}
-    </div>`).join('')}</div>
-    <div class="nav-mega-foot"><span>${catalog.lesson_count||0} lessons</span><a class="text-link" href="/tutorial">開啟教學 ›</a></div>
-  </div>`;
-  bindMegaHover(document.getElementById('nav-tutorial-mega'));
 }
 
 /**
@@ -204,19 +165,16 @@ export async function initTutorialHome() {
   injectNavLink();
   injectTicker();
   let user = null;
-  let catalog = null;
   try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch {}
   try {
     const q = new URLSearchParams({robot: 'leg'});
     if (user?.id) q.set('user', user.id);
-    catalog = await get('/api/tutorial/catalog?' + q);
-    renderMega(catalog, 'leg');
+    const catalog = await get('/api/tutorial/catalog?' + q);
     if (catalog.progress?.last) showResume(catalog.progress);
   } catch {/* store may be static-hosted without tutorial API */}
   await renderTicker();
   setInterval(renderTicker, 45000);
   window.addEventListener('q1:locale', () => {
-    applyI18n(document.getElementById('nav-tutorial-mega') || document);
-    if (catalog) renderMega(catalog, 'leg');
+    applyI18n(document.getElementById('nav-tutorial-link') || document);
   });
 }

@@ -699,7 +699,6 @@ async function refreshCatalog() {
   if (state.user?.id) q.set('user', state.user.id);
   state.catalog = await api('/api/tutorial/catalog?' + q);
   renderSidebar();
-  renderMega();
   updateDiscovery();
   updateTicker();
   if (state.progress || state.catalog.progress) {
@@ -778,48 +777,6 @@ function wireSideFolds() {
       saveSideFolds(next);
     });
   });
-}
-
-function bindMegaHover(root) {
-  const mega = root || document.getElementById('nav-tutorial-mega');
-  if (!mega || mega.dataset.boundHover) return;
-  mega.dataset.boundHover = '1';
-  let closeTimer = 0;
-  const open = () => { clearTimeout(closeTimer); mega.classList.add('is-open'); };
-  const scheduleClose = () => {
-    clearTimeout(closeTimer);
-    closeTimer = setTimeout(() => mega.classList.remove('is-open'), 280);
-  };
-  mega.addEventListener('pointerenter', open);
-  mega.addEventListener('pointerleave', scheduleClose);
-  mega.addEventListener('focusin', open);
-  mega.addEventListener('focusout', (e) => { if (!mega.contains(e.relatedTarget)) scheduleClose(); });
-  const trigger = mega.querySelector(':scope > a');
-  trigger?.addEventListener('click', (e) => {
-    // First click opens the panel; second click (when already open) follows the link.
-    if (!mega.classList.contains('is-open')) {
-      e.preventDefault();
-      open();
-    }
-  });
-}
-
-function renderMega() {
-  const panel = $('mega-panel');
-  if (!panel || !state.catalog) return;
-  panel.hidden = false;
-  panel.innerHTML = `<div class="nav-mega-inner">
-    <div class="nav-mega-head"><strong>${t('nav_school_mega')}</strong>
-    <div class="robot-toggle" role="group">${['leg','wheel'].map((r) =>
-      `<button type="button" data-mega-robot="${r}" class="${state.robot===r?'active':''}" aria-pressed="${state.robot===r}">${r==='leg'?'雙足':'雙輪'}</button>`).join('')}</div></div>
-    <div class="nav-mega-grid">${state.catalog.categories.map((cat) => `<div>
-      <p class="nav-mega-cat">${localeLabel(cat)}</p>
-      ${(cat.lessons||[]).map((les) => `<a class="nav-mega-card" href="/tutorial#${les.id}"><strong>${localeTitle(les)}</strong><small>${localeSummary(les).slice(0,90)}</small></a>`).join('') || '<small>—</small>'}
-    </div>`).join('')}</div>
-    <div class="nav-mega-foot"><span>${state.catalog.lesson_count||0} lessons</span><a class="text-link" href="/tutorial">開啟教學 ›</a></div>
-  </div>`;
-  panel.querySelectorAll('[data-mega-robot]').forEach((b) => b.addEventListener('click', () => setRobot(b.dataset.megaRobot)));
-  bindMegaHover();
 }
 
 /**
@@ -1695,7 +1652,7 @@ function wire() {
       x.setAttribute('aria-pressed', on);
     });
     if (state.lesson) openLesson(state.lessonId);
-    else { renderSidebar(); renderMega(); renderUser(); }
+    else { renderSidebar(); renderUser(); }
   }));
 
   document.querySelectorAll('.tut-side [data-robot]').forEach((b) => b.addEventListener('click', () => setRobot(b.dataset.robot)));
