@@ -809,7 +809,7 @@ function renderMega() {
   if (!panel || !state.catalog) return;
   panel.hidden = false;
   panel.innerHTML = `<div class="nav-mega-inner">
-    <div class="nav-mega-head"><strong>Isaac Lab 3 Tutorial</strong>
+    <div class="nav-mega-head"><strong>${t('nav_school_mega')}</strong>
     <div class="robot-toggle" role="group">${['leg','wheel'].map((r) =>
       `<button type="button" data-mega-robot="${r}" class="${state.robot===r?'active':''}" aria-pressed="${state.robot===r}">${r==='leg'?'雙足':'雙輪'}</button>`).join('')}</div></div>
     <div class="nav-mega-grid">${state.catalog.categories.map((cat) => `<div>
@@ -820,9 +820,6 @@ function renderMega() {
   </div>`;
   panel.querySelectorAll('[data-mega-robot]').forEach((b) => b.addEventListener('click', () => setRobot(b.dataset.megaRobot)));
   bindMegaHover();
-  const badge = $('nav-pending-badge');
-  const n = state.catalog.proposals?.pending || 0;
-  if (badge) { badge.hidden = !n; badge.textContent = String(n); }
 }
 
 /**
@@ -913,8 +910,6 @@ async function updateTicker() {
     const n = data.counts?.pending || 0;
     count.hidden = !n;
     count.textContent = n + (getLocale()==='en' ? ' pending' : ' 待審');
-    const badge = $('nav-pending-badge');
-    if (badge) { badge.hidden = !n; badge.textContent = String(n); }
   } catch {/* ticker is best-effort */}
 }
 

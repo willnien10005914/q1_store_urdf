@@ -1,5 +1,5 @@
-/** Home-page hooks for the Isaac Lab 3 tutorial: mega-menu, Hermes ticker, resume card. */
-import {getLocale, L} from './i18n.js';
+/** Home-page hooks for Q1 School (tutorial): mega-menu, Hermes ticker, resume card. */
+import {getLocale, L, t, applyI18n} from './i18n.js';
 
 const USER_KEY = 'q1-tutorial-user';
 const DISMISS_KEY = 'q1-tutorial-resume-dismiss';
@@ -34,11 +34,13 @@ function injectNavLink() {
   const wrap = document.createElement('div');
   wrap.className = 'nav-mega';
   wrap.id = 'nav-tutorial-mega';
-  wrap.innerHTML = `<a href="/tutorial" class="nav-highlight" id="nav-tutorial-link">Isaac Lab 3 <span class="badge" id="nav-pending-badge" hidden>0</span></a>
+  // Same plain nav style as Specs / Studio / SDK — only CES keeps the red light.
+  wrap.innerHTML = `<a href="/tutorial" id="nav-tutorial-link" data-i18n="nav_school">${t('nav_school')}</a>
     <div class="nav-mega-panel" id="mega-panel" hidden></div>`;
-  const studio = nav.querySelector('a[href="#studio"]');
-  if (studio) nav.insertBefore(wrap, studio);
+  const sdk = nav.querySelector('#nav-sdk') || nav.querySelector('a[href="#sdk"]');
+  if (sdk) sdk.insertAdjacentElement('afterend', wrap);
   else nav.appendChild(wrap);
+  applyI18n(wrap);
 }
 
 function injectTicker() {
@@ -46,7 +48,7 @@ function injectTicker() {
   const bar = document.createElement('div');
   bar.className = 'tut-ticker';
   bar.id = 'home-ticker';
-  bar.innerHTML = `<span class="label">Hermes</span><div class="track"><div class="scroll" id="home-ticker-scroll"><span>Isaac Lab 3 tutorial</span></div></div>
+  bar.innerHTML = `<span class="label">Hermes</span><div class="track"><div class="scroll" id="home-ticker-scroll"><span>${escapeHtml(t('nav_school'))}</span></div></div>
     <span class="count" id="home-ticker-count" hidden>0</span>`;
   const announcement = document.querySelector('.announcement');
   if (announcement) announcement.insertAdjacentElement('afterend', bar);
@@ -80,7 +82,7 @@ function renderMega(catalog, robot) {
   if (!panel || !catalog) return;
   panel.hidden = false;
   panel.innerHTML = `<div class="nav-mega-inner">
-    <div class="nav-mega-head"><strong>Isaac Lab 3 Tutorial</strong>
+    <div class="nav-mega-head"><strong>${escapeHtml(t('nav_school_mega'))}</strong>
     <div class="robot-toggle">${['leg','wheel'].map((r) =>
       `<a class="button secondary" style="font-size:11px;min-height:28px;padding:4px 10px${robot===r?';background:#fff;box-shadow:0 1px 3px #0001':''}" href="/tutorial?robot=${r}">${r==='leg'?'雙足':'雙輪'}</a>`).join('')}</div></div>
     <div class="nav-mega-grid">${(catalog.categories||[]).map((cat) => `<div>
@@ -90,9 +92,6 @@ function renderMega(catalog, robot) {
     <div class="nav-mega-foot"><span>${catalog.lesson_count||0} lessons</span><a class="text-link" href="/tutorial">開啟教學 ›</a></div>
   </div>`;
   bindMegaHover(document.getElementById('nav-tutorial-mega'));
-  const badge = document.getElementById('nav-pending-badge');
-  const n = catalog.proposals?.pending || 0;
-  if (badge) { badge.hidden = !n; badge.textContent = String(n); }
 }
 
 /**
@@ -172,8 +171,6 @@ async function renderTicker() {
     const count = document.getElementById('home-ticker-count');
     const n = data.counts?.pending || 0;
     if (count) { count.hidden = !n; count.textContent = n + (getLocale()==='en'?' pending':' 待審'); }
-    const badge = document.getElementById('nav-pending-badge');
-    if (badge) { badge.hidden = !n; badge.textContent = String(n); }
   } catch {/* home ticker is best-effort */}
 }
 
@@ -207,14 +204,19 @@ export async function initTutorialHome() {
   injectNavLink();
   injectTicker();
   let user = null;
+  let catalog = null;
   try { user = JSON.parse(localStorage.getItem(USER_KEY)); } catch {}
   try {
     const q = new URLSearchParams({robot: 'leg'});
     if (user?.id) q.set('user', user.id);
-    const catalog = await get('/api/tutorial/catalog?' + q);
+    catalog = await get('/api/tutorial/catalog?' + q);
     renderMega(catalog, 'leg');
     if (catalog.progress?.last) showResume(catalog.progress);
   } catch {/* store may be static-hosted without tutorial API */}
   await renderTicker();
   setInterval(renderTicker, 45000);
+  window.addEventListener('q1:locale', () => {
+    applyI18n(document.getElementById('nav-tutorial-mega') || document);
+    if (catalog) renderMega(catalog, 'leg');
+  });
 }
