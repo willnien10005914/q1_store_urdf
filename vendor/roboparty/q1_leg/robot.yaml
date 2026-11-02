@@ -1,0 +1,111 @@
+# Q1 Leg HHTools preset (hand-tuned ik_map).
+# Installed by scripts/setup_hhtools_q1.sh into ~/.config/hhtools/robots/q1_leg
+# and human-humanoid-tools/configs/robots/q1_leg.
+
+name: q1_leg
+display_name: Q1 Leg
+urdf: quanta_robot_legged.urdf
+mesh_search_paths:
+- meshes
+length_scale: 1.0
+up_axis: Z
+forward_axis: X
+dof_order:
+- center_waist_Yaw_joint
+- center_waist_Roll_joint
+- center_waist_Pitch_joint
+- left_hip_Pitch_joint
+- left_hip_Roll_joint
+- left_hip_Yaw_joint
+- left_knee_Pitch_joint
+- left_ankle_Pitch_joint
+- left_ankle_Roll_joint
+- left_shoulder_Pitch_joint
+- left_shoulder_Roll_joint
+- left_shoulder_Yaw_joint
+- left_elbow_Pitch_joint
+- left_wrist_Yaw_joint
+- left_finger_1_Roll_joint
+- left_finger_2_Roll_joint
+- right_hip_Pitch_joint
+- right_hip_Roll_joint
+- right_hip_Yaw_joint
+- right_knee_Pitch_joint
+- right_ankle_Pitch_joint
+- right_ankle_Roll_joint
+- right_shoulder_Pitch_joint
+- right_shoulder_Roll_joint
+- right_shoulder_Yaw_joint
+- right_elbow_Pitch_joint
+- right_wrist_Yaw_joint
+- right_finger_1_Roll_joint
+- right_finger_2_Roll_joint
+ik_map:
+  hips: center_hip_link
+  chest: center_torso_link
+  left_shoulder: left_shoulder_roll_link
+  left_elbow: left_elbow_pitch_link
+  left_wrist: left_wrist_yaw_link
+  right_shoulder: right_shoulder_roll_link
+  right_elbow: right_elbow_pitch_link
+  right_wrist: right_wrist_yaw_link
+  left_hip: left_hip_roll_link
+  left_knee: left_knee_pitch_link
+  left_ankle: left_ankle_roll_link
+  right_hip: right_hip_roll_link
+  right_knee: right_knee_pitch_link
+  right_ankle: right_ankle_roll_link
+weights:
+  t_weight:
+    hips: 10.0
+    chest: 0.5
+    left_shoulder: 0.5
+    left_elbow: 1.0
+    left_wrist: 1.0
+    right_shoulder: 0.5
+    right_elbow: 1.0
+    right_wrist: 1.0
+    left_hip: 0.5
+    left_knee: 1.0
+    left_ankle: 2.0
+    right_hip: 0.5
+    right_knee: 1.0
+    right_ankle: 2.0
+  r_weight:
+    hips: 2.0
+    chest: 0.5
+    left_shoulder: 0.1
+    left_elbow: 0.5
+    left_wrist: 0.5
+    right_shoulder: 0.1
+    right_elbow: 0.5
+    right_wrist: 0.5
+    left_hip: 0.2
+    left_knee: 0.5
+    left_ankle: 1.0
+    right_hip: 0.2
+    right_knee: 0.5
+    right_ankle: 1.0
+smooth_joint_filter_masks:
+  left_hip_yaw_link: 0.1
+  right_hip_yaw_link: 0.1
+  left_shoulder_roll_link: 1.0
+  left_shoulder_yaw_link: 0.3
+  right_shoulder_roll_link: 1.0
+  right_shoulder_yaw_link: 0.3
+  left_hip_roll_link: 1.0
+  right_hip_roll_link: 1.0
+feet:
+  left_contact_link: left_foot_link
+  right_contact_link: right_foot_link
+  ground_z: 0.0
+  foot_height: 0.02
+rest_offsets: {}
+retarget:
+  num_initialization_frames: 10
+  num_stabilization_frames: 5
+  apply_feet_stabilizer: true
+  feet_stabilizer:
+    ground_contact_z: 0.0
+    min_foot_clearance: 0.02
+  foot_clamp_max_lift_rate: 0.02

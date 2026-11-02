@@ -1,0 +1,153 @@
+robot: q1_leg
+reference: smpl
+calibrated_joint_q: {}
+notes: bootstrap zero-pose smpl calibration for Q1; refine in HHTools Web Calibrate
+derived:
+  robot_root_link: center_hip_link
+  reference_root: pelvis
+  scales:
+    chest: 0.17181818274919652
+    hips: 1.0
+    left_ankle: 0.9895794125594749
+    left_elbow: 0.4908253254018143
+    left_hip: 1.565845266553841
+    left_knee: 0.9439264344398639
+    left_shoulder: 0.7823009172812734
+    left_wrist: 0.3571050444358227
+    right_ankle: 0.9895794125594749
+    right_elbow: 0.4908253254018143
+    right_hip: 1.565845266553841
+    right_knee: 0.9439264344398639
+    right_shoulder: 0.7823009172812734
+    right_wrist: 0.3571050444358227
+  link_quaternions:
+    chest:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    hips:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    left_ankle:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    left_elbow:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    left_hip:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    left_knee:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    left_shoulder:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    left_wrist:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    right_ankle:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    right_elbow:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    right_hip:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    right_knee:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    right_shoulder:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    right_wrist:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  translation_offsets:
+    chest:
+    - 0.0
+    - 0.0
+    - 8.821487429422348e-10
+    hips:
+    - 0.0
+    - 0.0
+    - 0.0
+    left_ankle:
+    - 0.09401004761457443
+    - 0.149849995970726
+    - 0.008038336411118507
+    left_elbow:
+    - 0.18651361763477325
+    - 0.21549999713897705
+    - -0.034413617104291916
+    left_hip:
+    - 0.1487552970647812
+    - 0.08399999886751175
+    - -0.09538310021162033
+    left_knee:
+    - 0.0896730124950409
+    - 0.15199999511241913
+    - 0.017706187441945076
+    left_shoulder:
+    - 0.13299115002155304
+    - 0.1404999941587448
+    - -0.0034743212163448334
+    left_wrist:
+    - 0.20712092518806458
+    - 0.24549999833106995
+    - -0.10339991003274918
+    right_ankle:
+    - -0.09401004761457443
+    - -0.149849995970726
+    - 0.008038336411118507
+    right_elbow:
+    - -0.18651361763477325
+    - -0.21549999713897705
+    - -0.034413617104291916
+    right_hip:
+    - -0.1487552970647812
+    - -0.08399999886751175
+    - -0.09538310021162033
+    right_knee:
+    - -0.0896730124950409
+    - -0.15199999511241913
+    - 0.017706187441945076
+    right_shoulder:
+    - -0.13299115002155304
+    - -0.1404999941587448
+    - -0.0034743212163448334
+    right_wrist:
+    - -0.20712092518806458
+    - -0.24549999833106995
+    - -0.10339991003274918
+  _comment: Informational cache of the closed-form scale + offset derivation at save
+    time.  Loader ignores this block and re-derives from calibrated_joint_q so stale
+    caches cannot silently misalign retarget.

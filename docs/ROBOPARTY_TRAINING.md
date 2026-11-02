@@ -18,7 +18,28 @@ Local clones are discovered via `vendor/roboparty/SOURCES.txt` or
 
 ```bash
 bash scripts/setup_roboparty.sh   # clone/update the three repos next to this store
+bash scripts/setup_hhtools_q1.sh  # uv extras + register q1_leg preset + SMPL calibrations
 ```
+
+### HHTools → Q1 (formal retarget)
+
+`setup_hhtools_q1.sh` registers robot `q1_leg` (URDF + tuned `ik_map` + zero-pose
+`retarget_calibration_smpl.yaml` / `_smplx.yaml`). Smoke-tested:
+
+```bash
+cd "$Q1_HHTOOLS_ROOT"   # e.g. ~/projects/human-humanoid-tools
+uv run hhtools robot list
+uv run hhtools retarget run path/to/clip.npz --robot q1_leg -o out.csv \
+  --calibration-reference smpl
+```
+
+**Ballet YouTube → CSV** still needs:
+
+1. Licensed SMPL-X weights under `configs/body_models/smplx/` (or `HHTOOLS_BODY_MODELS`)
+2. GVHMR checkout + checkpoints + Python (`HHTOOLS_GVHMR_ROOT` / `HHTOOLS_GVHMR_PYTHON`)
+3. Video → Motion in HHTools Web, then Motion → Robot (`q1_leg`) → export CSV → Store HHTools tab
+
+Vendor copy of the tuned preset: `vendor/roboparty/q1_leg/`.
 
 ## Store pipeline (Q1 Leg)
 
