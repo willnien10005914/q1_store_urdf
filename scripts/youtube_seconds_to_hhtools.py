@@ -174,11 +174,20 @@ def import_and_retarget(gvhmr_out: Path, csv_out: Path, *, robot: str = "q1_leg"
     motions = csv_out.parent / "motions"
     motions.mkdir(parents=True, exist_ok=True)
     uv = _uv_bin()
-    # Convert GVHMR output folder → unified NPZ
+    # Prefer the HMR4D results file; a GVHMR job folder also contains
+    # preprocess/*.pt that are not importable as sequences.
+    results = gvhmr_out if gvhmr_out.is_file() else next(
+        iter(sorted(gvhmr_out.rglob("hmr4d_results.pt"))), None
+    )
+    if results is None:
+        raise SystemExit(f"No hmr4d_results.pt under {gvhmr_out}")
+    import_root = results.parent
+    # Convert GVHMR results → unified NPZ (sequence-filtered)
     _run([
         uv, "run", "hhtools", "import", "run",
         "--dataset", "gvhmr",
-        "--root", str(gvhmr_out if gvhmr_out.is_dir() else gvhmr_out.parent),
+        "--root", str(import_root),
+        "--sequence", results.stem,
         "--out", str(motions),
     ], cwd=hhtools)
     npzs = sorted(motions.rglob("*.npz"))
@@ -294,7 +303,15 @@ def main() -> None:
         return
 
     gvhmr_dir = out / "gvhmr_out"
-    result = run_gvhmr(video, gvhmr_dir, static_cam=args.static_cam)
+    gvhmr_dir.mkdir(parents=True, exist_ok=True)
+    # HHTools local GVHMR requires the *resolved* video path under job_root
+    # (Path.resolve follows symlinks), so copy rather than link.
+    staged = gvhmr_dir / video.name
+    if not staged.is_file() or staged.stat().st_size != video.stat().st_size:
+        if staged.exists() or staged.is_symlink():
+            staged.unlink()
+        shutil.copy2(video, staged)
+    result = run_gvhmr(staged, gvhmr_dir, static_cam=args.static_cam)
     csv_path = out / "q1_leg.csv"
     import_and_retarget(result if result.is_dir() else result.parent, csv_path)
     print("CSV", csv_path)
