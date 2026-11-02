@@ -243,8 +243,66 @@ class Store:
                 "sales_email": os.environ.get("Q1_SALES_EMAIL", ""),
                 "physics_scope": "本機 GPU worker 以 Isaac Sim PhysX + RSL-RL PPO 執行雙足工作（Spark、x86 + NVIDIA 等）；其他選項保留為規劃並記錄在工作 JSON。",
                 "rewards_scope": "Q1 任務的 reward 設計預設，並非所有 Isaac Lab 任務的通用選項。",
+                "roboparty": True,
+                "training_pipelines": ["mediapipe", "beyondmimic"],
+                "hhtools_import": True,
             },
+            "roboparty": self.roboparty_status(),
         }
+
+    def roboparty_status(self):
+        from .roboparty import roboparty_status
+        return roboparty_status()
+
+    def import_hhtools_motion(self, payload):
+        """Import an HHTools CSV (text) into a BeyondMimic-style store motion."""
+        from .roboparty import parse_hhtools_upload, motion_payload_from_hhtools
+        from .roboparty.hhtools_import import HHToolsImportError
+        if not isinstance(payload, dict):
+            raise APIError("請提供 JSON object。")
+        csv_text = payload.get("csv") or payload.get("text")
+        if not isinstance(csv_text, str) or not csv_text.strip():
+            raise APIError("請提供 HHTools 匯出的 CSV 文字（欄位 csv）。")
+        robot_type = payload.get("robot_type", "leg")
+        robot = next((r for r in self.catalog()["robots"] if r.get("id") == robot_type), None)
+        if not robot:
+            raise APIError("找不到動作對應的機型。")
+        try:
+            parsed = parse_hhtools_upload(csv_text)
+            body = motion_payload_from_hhtools(
+                parsed,
+                robot_type=robot_type,
+                urdf_sha256=robot.get("urdf_sha256"),
+                action_name=payload.get("action_name"),
+                source_title=payload.get("title"),
+            )
+        except HHToolsImportError as error:
+            raise APIError(str(error)) from error
+        # Drop DOFs that are not in this robot's URDF (e.g. RP1 wrist after remap).
+        urdf_path = (self.root / str(robot.get("urdf_url", "")).lstrip("/")).resolve()
+        try:
+            urdf = ET.fromstring(urdf_path.read_bytes())
+        except (OSError, ET.ParseError):
+            raise APIError("機型 URDF 無法讀取。", 503)
+        movable = {
+            joint.get("name")
+            for joint in urdf.findall("joint")
+            if joint.get("type") != "fixed" and joint.get("name")
+        }
+        kept = [name for name in body["joint_names"] if name in movable]
+        if len(kept) < 2:
+            raise APIError("HHTools CSV 映射後沒有足夠的 Q1 URDF 關節。")
+        if kept != body["joint_names"]:
+            dropped = [name for name in body["joint_names"] if name not in kept]
+            index = {name: i for i, name in enumerate(body["joint_names"])}
+            body["joint_names"] = kept
+            for frame in body["frames"]:
+                frame["q"] = [frame["q"][index[name]] for name in kept]
+                frame["joints"] = {name: frame["q"][i] for i, name in enumerate(kept)}
+            mapping = dict(body.get("mapping") or {})
+            mapping["urdf_dropped_joints"] = dropped
+            body["mapping"] = mapping
+        return self.create_motion(body)
 
     def urdf_facts(self, robot):
         """Movable joints, control axes, mass and limit ranges read from the bundled URDF."""
@@ -570,20 +628,37 @@ class Store:
                 confidence = frame["confidence"]
                 if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
                     raise APIError("confidence 必須介於 0 與 1。")
+            root = frame.get("root")
+            if root is not None:
+                if not isinstance(root, (list, tuple)) or len(root) < 3:
+                    raise APIError("frame root 必須是長度 ≥3 的陣列。")
+                if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or abs(v) > 1_000_000 for v in root[:3]):
+                    raise APIError("frame root 必須是有限數值。")
+            quat = frame.get("root_quat")
+            if quat is not None:
+                if not isinstance(quat, (list, tuple)) or len(quat) != 4:
+                    raise APIError("frame root_quat 必須是長度 4 的陣列。")
+                if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in quat):
+                    raise APIError("frame root_quat 必須是有限數值。")
+                if sum(float(v) * float(v) for v in quat) < 1e-16:
+                    raise APIError("frame root_quat 不可為零。")
         metadata = {key: value for key, value in payload.items() if key != "frames"}
         if len(json.dumps(metadata, ensure_ascii=False).encode()) > 32768:
             raise APIError("動作 mapping metadata 超過 32 KB。", 413)
         motion = dict(payload)
         if segment:
             motion["segment"] = segment
+        has_root = any(isinstance(frame.get("root"), (list, tuple)) for frame in frames)
         motion.update(id=uuid.uuid4().hex, created_at=self.clock(), urdf_sha256=urdf_sha,
                       frame_count=len(frames), duration_s=round(frames[-1]["time"] - frames[0]["time"], 6),
                       physical_simulation=False,
                       validation={"urdf_joint_names": True, "urdf_position_limits": True,
-                                  "monotonic_timestamps": True, "physical_validation": False})
+                                  "monotonic_timestamps": True, "physical_validation": False,
+                                  "root_motion": has_root})
         motion["url"] = "/api/motions/" + motion["id"]
         self.put("motions", motion)
-        return {key: motion[key] for key in ("id", "url", "robot_type", "frame_count", "duration_s", "urdf_sha256", "validation")}
+        return {key: motion[key] for key in ("id", "url", "robot_type", "frame_count", "duration_s", "urdf_sha256", "validation", "source", "pipeline")
+                if key in motion}
 
     def normalize_source(self, source):
         if not isinstance(source, dict):
@@ -623,6 +698,19 @@ class Store:
         # YouTube can remain a planning source without pretending a blocked download succeeded.
         if source.get("type") == "youtube":
             return {"type": "youtube", "url": youtube_url(source.get("url", "")), "downloaded": False}
+        if source.get("type") == "hhtools":
+            title = source.get("title") or source.get("action_name") or "HHTools retarget"
+            if not isinstance(title, str) or not title.strip():
+                raise APIError("HHTools 來源需要 title。")
+            return {
+                "type": "hhtools",
+                "id": source.get("id") or "hhtools",
+                "title": title.strip()[:120],
+                "pipeline": "beyondmimic",
+                "tracking_scope": "hhtools_retarget",
+                "requires_manual_review": False,
+                "is_training_result": False,
+            }
         raise APIError("無效的影片來源。")
 
     def normalize_segment(self, segment, source=None):
@@ -731,11 +819,23 @@ class Store:
         job["plan"]["job_id"] = job["id"]
         job["plan"]["action_name"] = action_name
         job["plan"]["motion_extraction_ready"] = bool(motion and not motion.get("demo", False))
+        pipeline = "mediapipe"
+        if motion:
+            mapping = motion.get("mapping") or {}
+            pipeline = str(
+                payload.get("pipeline")
+                or mapping.get("pipeline")
+                or ("beyondmimic" if motion.get("source") in {"hhtools", "beyondmimic", "roboparty"} or mapping.get("root_motion") else "mediapipe")
+            )
+        job["plan"]["pipeline"] = pipeline
+        job["config"]["pipeline"] = pipeline
         if mode == "worker":
             trainable = robot == "leg" and bool(motion)
             job["stage_label"] = "等待 GPU worker"
+            missing = "缺少動作參考（MediaPipe 或 HHTools／BeyondMimic）"
             job["training"] = {"budget_s": hours * 3600., "num_envs": config["num_envs"], "trainable": trainable,
-                               "blocker": None if trainable else ("雙輪 Isaac Lab 任務尚未接入" if robot != "leg" else "缺少 MediaPipe 關節參考")}
+                               "pipeline": pipeline,
+                               "blocker": None if trainable else ("雙輪 Isaac Lab 任務尚未接入" if robot != "leg" else missing)}
             job["plan"]["executor"] = "q1_store_worker" if trainable else None
             job["plan"]["trainable"] = trainable
         if segment:
@@ -743,6 +843,13 @@ class Store:
             job["plan"]["segment"] = dict(segment)
         if source.get("type") == "video_example":
             job["plan"]["reference_scope"] = "機器人影片分段參考；MediaPipe 為人體模型，辨識結果必須人工檢查，不代表 Q1 新策略已訓練。"
+        if pipeline == "beyondmimic":
+            job["plan"]["reference_scope"] = (
+                "RoboParty／HHTools retarget：含 root 軌跡的 BeyondMimic 風格參考；"
+                "訓練走 Q1 Leg Isaac worker，不是直接跑 RP1.3-BeyondMimic 任務 ID。"
+            )
+            if mode == "worker":
+                job["label"] = "等待 GPU worker · BeyondMimic／HHTools"
         if motion:
             job["motion_id"] = motion["id"]
             job["plan"]["motion"] = {key: motion[key] for key in ("id", "url", "robot_type", "frame_count", "duration_s", "urdf_sha256", "validation")}

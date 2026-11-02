@@ -63,6 +63,7 @@ from leg_humanoid_lab.isaac_evaluation import evaluate  # noqa: E402
 from leg_humanoid_lab.agent_cfg import PPOCfg  # noqa: E402
 from runtime_compat import runner_cfg, load_checkpoint  # noqa: E402
 from q1store.reference import build_reference  # noqa: E402
+from q1store.roboparty.reference_bm import build_beyondmimic_reference  # noqa: E402
 
 JOB = args.job_dir.resolve()
 JOB.mkdir(parents=True, exist_ok=True)
@@ -119,9 +120,12 @@ def ensure_reference():
     if not args.motion:
         parser.error("--motion is required for the train phase")
     motion = json.loads(args.motion.read_text())
-    reference = build_reference(motion, joint_names=list(JOINTS), default=DEFAULT.tolist(), lower=LOWER.tolist(),
-                                upper=UPPER.tolist(), urdf_sha256=hashlib.sha256(URDF.read_bytes()).hexdigest(),
-                                grounded_height=lambda q: grounded_height(np.asarray(q)), job_id=JOB.name)
+    mapping = motion.get("mapping") or {}
+    pipeline = str(motion.get("pipeline") or mapping.get("pipeline") or motion.get("source") or "mediapipe")
+    builder = build_beyondmimic_reference if pipeline in {"beyondmimic", "hhtools", "roboparty"} or mapping.get("root_motion") else build_reference
+    reference = builder(motion, joint_names=list(JOINTS), default=DEFAULT.tolist(), lower=LOWER.tolist(),
+                        upper=UPPER.tolist(), urdf_sha256=hashlib.sha256(URDF.read_bytes()).hexdigest(),
+                        grounded_height=lambda q: grounded_height(np.asarray(q)), job_id=JOB.name)
     write_json(REFERENCE, reference)
     log(f"reference: {len(reference['time'])} samples, {reference['duration_s']:.2f} s, "
         f"{len(reference['clip']['missing_joints_default'])} joints defaulted")

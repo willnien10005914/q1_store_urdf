@@ -266,6 +266,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             worker = self.store.worker_status()
             return self.json_response({"ok": True, "service": "q1-motion-store", "gpu_worker": worker["online"], "worker": worker})
+        if path == "/api/roboparty":
+            return self.json_response(self.store.roboparty_status())
         if path.startswith(("/api/tutorial/", "/api/llm/", "/api/agent/")):
             return self.route_tutorial_get(path)
         if path.startswith("/api/"):
@@ -425,6 +427,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.store.create_job(payload)
             elif path == "/api/motions":
                 result = self.store.create_motion(payload)
+            elif path == "/api/roboparty/hhtools":
+                result = self.store.import_hhtools_motion(payload)
             elif re.fullmatch(r"/api/jobs/[0-9a-f]{32}/cancel", path):
                 result = self.store.cancel(path.split("/")[3])
             elif path == "/api/listings":

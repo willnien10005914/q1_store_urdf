@@ -1,0 +1,4 @@
+Portions under vendor/roboparty/scripts/convert_motion.py are from
+RoboParty/robolab (BSD-3-Clause), Copyright (c) 2025-2026 The RoboLab Project Developers.
+HHTools is Apache-2.0 (Roboparty/human-humanoid-tools).
+RP1 documentation and assets: see https://github.com/Roboparty/RP1

@@ -1,0 +1,5 @@
+# Copy to SOURCES.txt or run scripts/setup_roboparty.sh
+# Override with Q1_HHTOOLS_ROOT / Q1_ROBOPARTY_TRAIN_ROOT / Q1_RP1_ROOT.
+HHTOOLS=/path/to/human-humanoid-tools
+ROBOPARTY_TRAIN=/path/to/roboparty_train
+RP1=/path/to/RP1
