@@ -33,11 +33,27 @@ uv run hhtools retarget run path/to/clip.npz --robot q1_leg -o out.csv \
   --calibration-reference smpl
 ```
 
-**Ballet YouTube → CSV** still needs:
+**Ballet YouTube → CSV** (seconds → GVHMR/SMPL-X → Q1):
 
-1. Licensed SMPL-X weights under `configs/body_models/smplx/` (or `HHTOOLS_BODY_MODELS`)
-2. GVHMR checkout + checkpoints + Python (`HHTOOLS_GVHMR_ROOT` / `HHTOOLS_GVHMR_PYTHON`)
-3. Video → Motion in HHTools Web, then Motion → Robot (`q1_leg`) → export CSV → Store HHTools tab
+```bash
+# Optional: source .data/hhtools.env  (script also auto-loads it)
+# One-time after registering at https://smpl-x.is.tue.mpg.de/ :
+python3 scripts/youtube_seconds_to_hhtools.py \
+  --place-smplx /path/to/SMPLX_NEUTRAL.npz --status-only
+
+python3 scripts/youtube_seconds_to_hhtools.py \
+  --youtube-url 'https://www.youtube.com/watch?v=a5R0Xf46hyg' \
+  --start 0 --end 6.5 \
+  --action-name 'Ballet · HHTools formal' \
+  --import-store
+```
+
+Clip lands under `.data/roboparty/youtube_gvhmr/<video_id>/clip_<start>_<end>.mp4`
+then GVHMR writes SMPL-X motion → `hhtools import/retarget` → `q1_leg.csv`.
+Use `--no-gvhmr` to only download/cut by seconds.
+
+Public GVHMR checkpoints (YOLO/ViTPose/HMR2/GVHMR) are already under
+`$HHTOOLS_GVHMR_ROOT/inputs/checkpoints/`. The only gated file is **SMPL-X**.
 
 Vendor copy of the tuned preset: `vendor/roboparty/q1_leg/`.
 
