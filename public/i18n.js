@@ -143,6 +143,7 @@ const STRINGS = {
     robot_wheel: '雙輪',
     workflow: '工作流程',
     step_source: '影片與目標',
+    step_hhtools: 'HHTools 校正',
     step_training: '訓練設計',
     step_world: '世界舞台',
     step_result: '成果與分享',
