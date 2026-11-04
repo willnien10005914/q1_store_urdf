@@ -56,7 +56,7 @@ async function importHHTools(){
  const status=$('hhtools-status');status.textContent='';status.classList.remove('error');
  let csv=$('hhtools-csv').value.trim();const file=$('hhtools-file').files?.[0];
  if(!csv&&file)csv=await file.text();
- if(!csv){status.textContent=t('hhtools_need_csv');status.classList.add('error');return;}
+ if(!csv){status.textContent=t('hhtools_use_video');status.classList.remove('error');return importYouTubeHHTools();}
  const action_name=($('hhtools-action').value.trim()||file?.name?.replace(/\.csv$/i,'')||'HHTools motion');
  const button=$('hhtools-import');button.disabled=true;status.textContent=tr('正在匯入…','Importing…');
  try{
