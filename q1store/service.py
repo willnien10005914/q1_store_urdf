@@ -247,6 +247,7 @@ class Store:
                 "training_pipelines": ["mediapipe", "beyondmimic", "beyondmimic_v3"],
                 "hhtools_import": True,
                 "youtube_hhtools": True,
+                "hhtools_preview": True,
             },
             "roboparty": self.roboparty_status(),
         }
@@ -369,6 +370,81 @@ class Store:
         }
         out["action_name"] = action_name.strip()
         return out
+
+    def preview_hhtools_motion(self, payload):
+        """Kinematic MuJoCo URDF video of an HHTools / BeyondMimic motion (no PPO)."""
+        if not isinstance(payload, dict):
+            raise APIError("請提供 JSON object。")
+        motion_id = payload.get("motion_id") or payload.get("id")
+        if not isinstance(motion_id, str):
+            raise APIError("請提供 motion_id。")
+        motion = self.get("motions", motion_id)
+        if motion.get("source") not in {"hhtools", "beyondmimic", "roboparty"} and not (motion.get("mapping") or {}).get("root_motion"):
+            raise APIError("此動作不是 HHTools／BeyondMimic 參考，無法做 retarget 預覽。")
+        preview_dir = self.data_dir / "roboparty" / "previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        out_path = preview_dir / f"{motion_id}.mp4"
+        # Prefer a job reference built for this motion (correct Z re-ground).
+        traj_path = preview_dir / f"{motion_id}.preview_src.json"
+        payload_traj = motion
+        for job in self.all("jobs"):
+            if job.get("motion_id") != motion_id:
+                continue
+            ref_path = self.jobs_dir / job["id"] / "reference.json"
+            if ref_path.is_file():
+                try:
+                    payload_traj = json.loads(ref_path.read_text(encoding="utf-8"))
+                    break
+                except (OSError, json.JSONDecodeError):
+                    pass
+        traj_path.write_text(json.dumps(payload_traj, ensure_ascii=False), encoding="utf-8")
+        script = self.root / "scripts" / "render_hhtools_reference_video.py"
+        # Store server may run under a Python without mujoco; spawn system python3.
+        py = resolve_executable(os.environ.get("Q1_PREVIEW_PYTHON"), "python3", "python3.10", "python3.11")
+        if not py:
+            raise APIError("找不到可用的 python3 來渲染預覽。", 503)
+        cmd = [
+            py, str(script),
+            "--out", str(out_path),
+            "--width", str(int(payload.get("width") or 960)),
+            "--height", str(int(payload.get("height") or 720)),
+            "--fps", str(float(payload.get("fps") or 30)),
+        ]
+        if "time" in payload_traj and "q" in payload_traj:
+            cmd.extend(["--reference", str(traj_path)])
+        else:
+            cmd.extend(["--motion", str(traj_path)])
+        try:
+            completed = subprocess.run(cmd, cwd=str(self.root), check=True, capture_output=True, text=True, timeout=180)
+        except subprocess.TimeoutExpired as error:
+            raise APIError("URDF 預覽渲染逾時。") from error
+        except subprocess.CalledProcessError as error:
+            detail = (error.stderr or error.stdout or str(error))[-800:]
+            raise APIError(f"URDF 預覽渲染失敗：{detail}") from error
+        meta = {}
+        try:
+            meta = json.loads(completed.stdout.strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError, AttributeError):
+            meta = {"path": str(out_path)}
+        if not out_path.is_file():
+            raise APIError("預覽影片未產出。", 503)
+        return {
+            "motion_id": motion_id,
+            "video_url": f"/media/roboparty/previews/{motion_id}.mp4",
+            "kind": "hhtools_kinematic_preview",
+            "pipeline": motion.get("pipeline") or (motion.get("mapping") or {}).get("pipeline"),
+            "action_name": motion.get("action_name"),
+            **meta,
+        }
+
+    def preview_media(self, name):
+        """Serve a kinematic retarget preview mp4 under .data/roboparty/previews/."""
+        if not re.fullmatch(r"[0-9a-f]{32}\.mp4|[A-Za-z0-9_.-]+\.mp4", name):
+            raise APIError("找不到預覽影片。", 404)
+        path = (self.data_dir / "roboparty" / "previews" / name).resolve()
+        if not path.is_relative_to((self.data_dir / "roboparty" / "previews").resolve()) or not path.is_file():
+            raise APIError("找不到預覽影片。", 404)
+        return path, "video/mp4"
 
     def urdf_facts(self, robot):
         """Movable joints, control axes, mass and limit ranges read from the bundled URDF."""

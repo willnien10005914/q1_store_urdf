@@ -285,6 +285,10 @@ class Handler(BaseHTTPRequestHandler):
             file_path, content_type = self.store.job_media(match.group(1), match.group(2))
             return self.serve_file(file_path, head, cache="no-cache" if match.group(2).endswith((".log", ".jsonl", "progress.json")) else "public, max-age=3600",
                                    content_type=content_type)
+        if path.startswith("/media/roboparty/previews/"):
+            name = path.removeprefix("/media/roboparty/previews/")
+            file_path, content_type = self.store.preview_media(name)
+            return self.serve_file(file_path, head, cache="public, max-age=3600", content_type=content_type)
         if path.startswith("/media/uploads/"):
             name = path.removeprefix("/media/uploads/")
             if not re.fullmatch(r"[0-9a-f]{32}\.(mp4|webm|mov|m4v)", name):
@@ -431,6 +435,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.store.import_hhtools_motion(payload)
             elif path == "/api/roboparty/youtube":
                 result = self.store.import_youtube_hhtools_motion(payload)
+            elif path == "/api/roboparty/preview":
+                result = self.store.preview_hhtools_motion(payload)
             elif re.fullmatch(r"/api/jobs/[0-9a-f]{32}/cancel", path):
                 result = self.store.cancel(path.split("/")[3])
             elif path == "/api/listings":

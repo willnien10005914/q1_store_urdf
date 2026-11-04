@@ -71,6 +71,7 @@ async function importHHTools(){
   status.textContent=t('hhtools_ready')+' · id '+record.id.slice(0,8);
   feedback(t('hhtools_ready'));
   toast(tr('已匯入 HHTools 動作，可設計訓練。','HHTools motion imported — design training next.'));
+  await playHHToolsMotion(record.id).catch(()=>{});
  }catch(e){status.textContent=e.message;status.classList.add('error');feedback(e.message,true);}
  finally{button.disabled=false;}
 }
@@ -99,8 +100,50 @@ async function importYouTubeHHTools(event){
   $('motion-note').textContent=t('hhtools_yt_ready');
   feedback(status.textContent);
   toast(tr('已匯入 Ballet v3 動作，可設計訓練。','Ballet v3 motion imported — design training next.'));
+  await playHHToolsMotion(record.id).catch(()=>{});
  }catch(e){status.textContent=e.message;status.classList.add('error');feedback(e.message,true);}
  finally{button.disabled=false;}
+}
+let hhtoolsPlayTimer=null;
+async function playHHToolsMotion(motionId){
+ if(hhtoolsPlayTimer){cancelAnimationFrame(hhtoolsPlayTimer);hhtoolsPlayTimer=null;}
+ const full=await api('/api/motions/'+motionId);
+ const names=full.joint_names||[],frames=full.frames||[];
+ if(frames.length<2)return;
+ studioViewer?.setPlaying(false);studioViewer?.setRenderingPaused(false);
+ const started=performance.now();
+ const step=()=>{
+  const t=(performance.now()-started)/1000%(Number(full.duration_s||frames.at(-1).time)+0.4);
+  let index=frames.findIndex(f=>f.time>=t);if(index<0)index=frames.length-1;
+  const frame=frames[index],joints={};
+  names.forEach((name,k)=>joints[name]=frame.q[k]);
+  studioViewer?.setJoints(joints);
+  $('retarget-status').textContent=tr('URDF 預覽（無 PPO） · ','URDF preview (no PPO) · ')+Number(frame.time).toFixed(2)+' s';
+  hhtoolsPlayTimer=requestAnimationFrame(step);
+ };
+ hhtoolsPlayTimer=requestAnimationFrame(step);
+}
+async function previewHHToolsVideo(){
+ if(!hhtoolsMotion?.id){toast(t('hhtools_need_motion'));return;}
+ const status=$('hhtools-status');const button=$('hhtools-preview');
+ if(button)button.disabled=true;
+ status.textContent=tr('正在渲染 URDF retarget 預覽影片（不跑 PPO）…','Rendering URDF retarget preview (no PPO)…');
+ try{
+  const preview=await api('/api/roboparty/preview',{motion_id:hhtoolsMotion.id});
+  hhtoolsMotion.preview_url=preview.video_url;
+  status.textContent=t('hhtools_preview_ready')+' · '+preview.duration_s+'s';
+  let player=$('hhtools-preview-video');
+  if(!player){
+   player=el('video');player.id='hhtools-preview-video';player.controls=true;player.playsInline=true;
+   player.style.width='100%';player.style.marginTop='.75rem';player.style.borderRadius='8px';player.style.background='#111';
+   $('source-hhtools')?.append(player);
+  }
+  player.src=preview.video_url+'?t='+Date.now();player.hidden=false;player.load();
+  try{await player.play();}catch{}
+  feedback(t('hhtools_preview_ready'));
+  toast(tr('已產生 retarget 預覽影片（無 PPO）。','Retarget preview video ready (no PPO).'));
+ }catch(e){status.textContent=e.message;status.classList.add('error');feedback(e.message,true);}
+ finally{if(button)button.disabled=false;}
 }
 async function loadRobot(type){
  referencePlayer.clear();retarget.resetCapture();$('people').replaceChildren();$('people').dataset.signature='';document.querySelectorAll('[data-robot]').forEach(b=>b.disabled=true);
@@ -216,7 +259,7 @@ async function boot(){
  [heroViewer,studioViewer]=await Promise.all([create($('hero-viewer'),{}),create($('studio-viewer'),{onStatus:message=>{$('retarget-status').textContent=message;}})]);await heroViewer?.loadRobot(robot());await studioViewer?.loadRobot(robot());heroViewer?.setMotion('stand');heroViewer?.setPlaying(false);studioViewer?.setPlaying(false);renderJointPanel();$('joint-count').textContent=robot().movable_joints+tr(' 個原生關節 · ',' native joints · ')+robot().control_joints.length+tr(' 控制軸',' control axes');const firstClip=catalog.video_examples?.find(v=>v.robot_type===robotType);if(firstClip)await loadFeature(firstClip);else await demo();updateSummary();
  }catch(e){feedback(tr('工作室載入失敗：','Studio failed to load: ')+e.message,true);toast(tr('載入失敗，請重新整理。','Load failed. Please refresh.'));console.error(e);}
 }
-document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>panel(b.dataset.panel));document.querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>panel(b.dataset.next));document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>selectSource(b.dataset.source).catch(e=>feedback(e.message,true)));document.querySelectorAll('[data-robot]').forEach(b=>b.onclick=()=>loadRobot(b.dataset.robot).catch(e=>toast(e.message)));$('load-example').onclick=()=>demo();$('source-youtube').onsubmit=youtube;$('track-video').onclick=()=>startTracking().catch(e=>feedback(e.message,true));$('hhtools-import').onclick=()=>importHHTools().catch(e=>feedback(e.message,true));if($('hhtools-youtube'))$('hhtools-youtube').onsubmit=importYouTubeHHTools;$('hhtools-file').onchange=()=>{const file=$('hhtools-file').files?.[0];if(file&&!$('hhtools-action').value.trim())$('hhtools-action').value=file.name.replace(/\.csv$/i,'');};
+document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>panel(b.dataset.panel));document.querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>panel(b.dataset.next));document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>selectSource(b.dataset.source).catch(e=>feedback(e.message,true)));document.querySelectorAll('[data-robot]').forEach(b=>b.onclick=()=>loadRobot(b.dataset.robot).catch(e=>toast(e.message)));$('load-example').onclick=()=>demo();$('source-youtube').onsubmit=youtube;$('track-video').onclick=()=>startTracking().catch(e=>feedback(e.message,true));$('hhtools-import').onclick=()=>importHHTools().catch(e=>feedback(e.message,true));if($('hhtools-preview'))$('hhtools-preview').onclick=()=>previewHHToolsVideo().catch(e=>feedback(e.message,true));if($('hhtools-youtube'))$('hhtools-youtube').onsubmit=importYouTubeHHTools;$('hhtools-file').onchange=()=>{const file=$('hhtools-file').files?.[0];if(file&&!$('hhtools-action').value.trim())$('hhtools-action').value=file.name.replace(/\.csv$/i,'');};
 $('video-file').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>100*1024*1024){feedback(tr('請選擇小於 100 MB 的影片。','Choose a video smaller than 100 MB.'),true);return;}feedback(tr('正在載入 ','Loading ')+file.name+'…');try{const value=await uploadVideo(file);if(sourceObjectUrl)URL.revokeObjectURL(sourceObjectUrl);if(value.url.startsWith('blob:'))sourceObjectUrl=value.url;await loadVideo(value);feedback(isBrowserLocal()?tr('影片在此瀏覽器預覽，不會上傳伺服器。按開始辨識進行 MediaPipe 映射。','The video previews in this browser and is not uploaded. Press Start recognition for MediaPipe mapping.'):tr('影片已上傳。按開始辨識進行 MediaPipe 映射。','Video uploaded. Press Start recognition for MediaPipe mapping.'));}catch(e){feedback(e.message,true);}};
 
 $('play-reference').onclick=async()=>{if(!source.motion_reference_url)return;const button=$('play-reference');button.disabled=true;try{retarget.resetCapture();clipEditor.stopPreview();const response=await fetch(source.motion_reference_url);if(!response.ok)throw Error(tr('骨架參考載入失敗。','Failed to load skeleton reference.'));const reference=await response.json();referencePlayer.load(reference,robot());clipEditor.setSegment(reference.segment);person='annotated-source-robot';$('pose-overlay').hidden=false;$('pose-badge').textContent=tr('33 POINTS / 人工校正','33 POINTS / CALIBRATED');$('source-watermark').textContent=tr('來源機器人骨架 · 人工校正 · 非自動辨識結果','Source robot skeleton · manually calibrated · not automatic recognition');$('people').replaceChildren();$('people').dataset.signature='';studioViewer?.setPlaying(false);studioViewer?.setRenderingPaused(false);await referencePlayer.play({segment:reference.segment,loop:true});feedback(tr('正在同步播放來源影片、人工校正的 MediaPipe 33 點格式骨架與 Q1 原生關節。','Playing the source video, the calibrated MediaPipe 33-point skeleton and Q1 native joints in sync.'));}catch(e){feedback(e.message,true);}finally{button.disabled=false;}};
