@@ -162,8 +162,10 @@ def repair_frozen_hip_pitch(csv_text: str) -> tuple[str, list[str]]:
 def find_cached_csv(video_id: str) -> Path | None:
     root = DEFAULT_CACHE / video_id
     candidates = [
+        root / "q1_leg_calibrated.csv",
         root / "q1_leg_v2.csv",
         root / "q1_leg.csv",
+        DEFAULT_CACHE / "a5R0Xf46hyg" / "q1_leg_calibrated.csv",
         DEFAULT_CACHE / "a5R0Xf46hyg" / "q1_leg_v2.csv",
         DEFAULT_CACHE / "a5R0Xf46hyg" / "q1_leg.csv",
     ]
@@ -224,7 +226,9 @@ def run_youtube_to_motion(
         csv_text = csv_path.read_text(encoding="utf-8")
         source = f"pipeline:{csv_path}"
 
-    csv_text, repairs = repair_frozen_hip_pitch(csv_text)
+    # Do not invent swing-hip Pitch. A frozen DOF must stay visible so Calibrate
+    # / retarget can be fixed; synthesizing Pitch from Roll produced a split.
+    repairs: list[str] = []
     qa = qa_leg_motion(csv_text)
     if repairs:
         qa["repairs"] = repairs

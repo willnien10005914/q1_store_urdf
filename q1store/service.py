@@ -371,6 +371,39 @@ class Store:
         out["action_name"] = action_name.strip()
         return out
 
+    def hhtools_calibrate(self, payload):
+        """Proxy HHTools zero-pose calibrate / retarget (RP1-style Web Calibrate)."""
+        if payload is None:
+            payload = {}
+        if not isinstance(payload, dict):
+            raise APIError("請提供 JSON object。")
+        action = payload.get("action") or "status"
+        if action not in {"status", "propose", "save", "retarget"}:
+            raise APIError("action 必須是 status、propose、save 或 retarget。")
+        py = Path("/home/will/projects/human-humanoid-tools/.venv/bin/python")
+        if not py.is_file():
+            raise APIError("本機尚未安裝 HHTools virtualenv。", 503)
+        script = self.root / "scripts/hhtools_calibrate_q1.py"
+        try:
+            completed = subprocess.run(
+                [str(py), str(script), action],
+                input=json.dumps(payload),
+                text=True,
+                capture_output=True,
+                cwd=str(self.root),
+                timeout=600 if action == "retarget" else 120,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise APIError("HHTools 校正／retarget 逾時。") from error
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "failed")[-800:]
+            raise APIError(f"HHTools {action} 失敗：{detail}")
+        try:
+            return json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise APIError(f"HHTools 回傳不是 JSON：{(completed.stdout or '')[-400:]}") from error
+
     def preview_hhtools_motion(self, payload):
         """Kinematic MuJoCo URDF video of an HHTools / BeyondMimic motion (no PPO)."""
         if not isinstance(payload, dict):
@@ -421,11 +454,18 @@ class Store:
         except subprocess.CalledProcessError as error:
             detail = (error.stderr or error.stdout or str(error))[-800:]
             raise APIError(f"URDF 預覽渲染失敗：{detail}") from error
-        meta = {}
+        meta = {"path": str(out_path)}
         try:
-            meta = json.loads(completed.stdout.strip().splitlines()[-1])
-        except (json.JSONDecodeError, IndexError, AttributeError):
-            meta = {"path": str(out_path)}
+            meta = json.loads(completed.stdout)
+        except (json.JSONDecodeError, TypeError):
+            # Pretty-printed JSON: take the last object-looking block.
+            text = (completed.stdout or "").strip()
+            start = text.find("{")
+            if start >= 0:
+                try:
+                    meta = json.loads(text[start:])
+                except json.JSONDecodeError:
+                    pass
         if not out_path.is_file():
             raise APIError("預覽影片未產出。", 503)
         return {
