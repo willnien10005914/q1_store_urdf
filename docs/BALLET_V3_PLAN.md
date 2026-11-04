@@ -32,3 +32,9 @@ Critical DOFs for Q1: **stance hip/ankle for balance**, **swing hip Pitch + knee
 - `height_error` ≪ 0.1 m early in training  
 - Swing hip/knee **ptp > 0.2 rad** in imported CSV  
 - Result video on Store job page  
+
+## Retarget QA (before PPO)
+
+1. HHTools tab → import / YouTube v3 → **URDF 預覽影片（無 PPO）** (`POST /api/roboparty/preview`).
+2. Or CLI: `python3 scripts/render_hhtools_reference_video.py --reference .data/jobs/<id>/reference.json --out preview.mp4`
+3. Current 1–4s preview shows **wrong ballet geometry** (near-split / airborne) vs source passé — fix IK / hip repair before more PPO.  

@@ -81,6 +81,7 @@ adapts the **reference contract** for the existing Q1 Leg Isaac worker.
 - `GET /api/roboparty` — discovery status
 - `POST /api/roboparty/hhtools` — `{ "csv": "...", "robot_type": "leg", "action_name": "…" }`
 - `POST /api/roboparty/youtube` — `{ "youtube_url", "start", "end", "robot_type": "leg", "action_name" }` → BeyondMimic v3 motion
+- `POST /api/roboparty/preview` — `{ "motion_id" }` → kinematic URDF MP4 (**no PPO**); also CLI `scripts/render_hhtools_reference_video.py`
 
 ## Seed / convert
 
