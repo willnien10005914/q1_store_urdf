@@ -429,6 +429,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.store.create_motion(payload)
             elif path == "/api/roboparty/hhtools":
                 result = self.store.import_hhtools_motion(payload)
+            elif path == "/api/roboparty/youtube":
+                result = self.store.import_youtube_hhtools_motion(payload)
             elif re.fullmatch(r"/api/jobs/[0-9a-f]{32}/cancel", path):
                 result = self.store.cancel(path.split("/")[3])
             elif path == "/api/listings":

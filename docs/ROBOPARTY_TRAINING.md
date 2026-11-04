@@ -63,10 +63,15 @@ Vendor copy of the tuned preset: `vendor/roboparty/q1_leg/`.
    aliases — the importer remaps `left_hip_pitch_joint` → `left_hip_Pitch_joint`,
    etc.). Export CSV with `# sample_rate` and columns
    `time,root_x,root_y,root_z,root_qx,root_qy,root_qz,root_qw,dof_*`.
-2. **Motion Studio → HHTools tab** → import CSV (`POST /api/roboparty/hhtools`).
-3. Design training → **真實訓練 · Isaac Lab PPO**. Job `pipeline=beyondmimic`.
+2. **Motion Studio → HHTools tab** → import CSV (`POST /api/roboparty/hhtools`)
+   **or** YouTube seconds (`POST /api/roboparty/youtube`, `pipeline=beyondmimic_v3`).
+3. Design training → **真實訓練 · Isaac Lab PPO**. Job `pipeline=beyondmimic` / `beyondmimic_v3`.
 4. GPU worker builds reference with `build_beyondmimic_reference` (preserves root
    XY/Z + quat) instead of MediaPipe’s zero-XY grounded height.
+
+**Ballet v3** (YouTube 1–4s): see `docs/BALLET_V3_PLAN.md`. Web form defaults to
+`a5R0Xf46hyg` seconds 1–4; slices cached GVHMR CSV when present and repairs
+frozen swing-hip Pitch from Roll/Knee before import.
 
 Full RP1.3-BeyondMimic Isaac task IDs stay on `roboparty_train`. This store
 adapts the **reference contract** for the existing Q1 Leg Isaac worker.
@@ -75,6 +80,7 @@ adapts the **reference contract** for the existing Q1 Leg Isaac worker.
 
 - `GET /api/roboparty` — discovery status
 - `POST /api/roboparty/hhtools` — `{ "csv": "...", "robot_type": "leg", "action_name": "…" }`
+- `POST /api/roboparty/youtube` — `{ "youtube_url", "start", "end", "robot_type": "leg", "action_name" }` → BeyondMimic v3 motion
 
 ## Seed / convert
 

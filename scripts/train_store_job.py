@@ -122,7 +122,7 @@ def ensure_reference():
     motion = json.loads(args.motion.read_text())
     mapping = motion.get("mapping") or {}
     pipeline = str(motion.get("pipeline") or mapping.get("pipeline") or motion.get("source") or "mediapipe")
-    builder = build_beyondmimic_reference if pipeline in {"beyondmimic", "hhtools", "roboparty"} or mapping.get("root_motion") else build_reference
+    builder = build_beyondmimic_reference if pipeline in {"beyondmimic", "beyondmimic_v3", "hhtools", "roboparty"} or mapping.get("root_motion") else build_reference
     reference = builder(motion, joint_names=list(JOINTS), default=DEFAULT.tolist(), lower=LOWER.tolist(),
                         upper=UPPER.tolist(), urdf_sha256=hashlib.sha256(URDF.read_bytes()).hexdigest(),
                         grounded_height=lambda q: grounded_height(np.asarray(q)), job_id=JOB.name)

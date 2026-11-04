@@ -15,6 +15,7 @@ CSV/PKL exports.
 from .paths import discover_roboparty, status as roboparty_status
 from .hhtools_import import parse_hhtools_csv, parse_hhtools_upload, motion_payload_from_hhtools
 from .reference_bm import build_beyondmimic_reference
+from .youtube_pipeline import run_youtube_to_motion, slice_hhtools_csv, qa_leg_motion
 
 __all__ = [
     "discover_roboparty",
@@ -23,4 +24,7 @@ __all__ = [
     "parse_hhtools_upload",
     "motion_payload_from_hhtools",
     "build_beyondmimic_reference",
+    "run_youtube_to_motion",
+    "slice_hhtools_csv",
+    "qa_leg_motion",
 ]

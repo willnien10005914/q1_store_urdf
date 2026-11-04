@@ -15,6 +15,12 @@ from q1store.roboparty.hhtools_import import (
 )
 from q1store.roboparty.reference_bm import build_beyondmimic_reference
 from q1store.roboparty.paths import status as roboparty_status
+from q1store.roboparty.youtube_pipeline import (
+    qa_leg_motion,
+    repair_frozen_hip_pitch,
+    slice_hhtools_csv,
+    youtube_video_id,
+)
 from q1store.service import Store
 
 
@@ -127,6 +133,37 @@ class StoreHHToolsIntegration(unittest.TestCase):
         })
         self.assertEqual(job["plan"]["pipeline"], "beyondmimic")
         self.assertTrue(job["training"]["trainable"])
+
+
+class YouTubeV3PipelineTests(unittest.TestCase):
+    def test_video_id_shorts(self):
+        self.assertEqual(
+            youtube_video_id("https://youtube.com/shorts/a5R0Xf46hyg?si=abc"),
+            "a5R0Xf46hyg",
+        )
+
+    def test_slice_and_repair_hip_pitch(self):
+        # Build a mini CSV where right hip Pitch is frozen but Roll moves (ballet fail mode).
+        lines = [
+            "# sample_rate: 10",
+            "time,root_x,root_y,root_z,root_qx,root_qy,root_qz,root_qw,"
+            "dof_left_hip_Pitch_joint,dof_right_hip_Pitch_joint,"
+            "dof_right_hip_Roll_joint,dof_right_knee_Pitch_joint,"
+            "dof_left_knee_Pitch_joint",
+        ]
+        for i in range(12):
+            t = i * 0.1
+            roll = -0.2 - 0.1 * i
+            knee = -0.05 * (i % 5)
+            lines.append(
+                f"{t:.1f},0,0,0.85,0,0,0,1,0.1,0.0,{roll:.3f},{knee:.3f},0.05"
+            )
+        csv_text = "\n".join(lines) + "\n"
+        sliced = slice_hhtools_csv(csv_text, 0.2, 1.0)
+        repaired, notes = repair_frozen_hip_pitch(sliced)
+        self.assertTrue(notes)
+        qa = qa_leg_motion(repaired)
+        self.assertGreater(qa["dof_right_hip_Pitch_joint"], 0.15)
 
 
 if __name__ == "__main__":

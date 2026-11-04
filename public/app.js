@@ -74,6 +74,34 @@ async function importHHTools(){
  }catch(e){status.textContent=e.message;status.classList.add('error');feedback(e.message,true);}
  finally{button.disabled=false;}
 }
+async function importYouTubeHHTools(event){
+ if(event)event.preventDefault();
+ const status=$('hhtools-status');status.textContent='';status.classList.remove('error');
+ const youtube_url=($('hhtools-yt-url').value||'').trim();
+ const start=+$('hhtools-yt-start').value,end=+$('hhtools-yt-end').value;
+ const action_name=($('hhtools-yt-action').value.trim()||'Ballet · YouTube HHTools v3');
+ if(!youtube_url){status.textContent=t('hhtools_yt_need_url');status.classList.add('error');return;}
+ if(!(end>start)){status.textContent=t('hhtools_yt_bad_range');status.classList.add('error');return;}
+ const button=$('hhtools-yt-import');button.disabled=true;
+ status.textContent=tr('正在轉換 YouTube → HHTools v3…','Converting YouTube → HHTools v3…');
+ try{
+  const record=await api('/api/roboparty/youtube',{youtube_url,start,end,robot_type:robotType,action_name,title:action_name});
+  hhtoolsMotion={id:record.id,frame_count:record.frame_count,duration_s:record.duration_s,validation:record.validation,action_name,pipeline:'beyondmimic_v3',qa:record.qa,repairs:record.repairs};
+  source={type:'hhtools',id:record.id,title:action_name,pipeline:'beyondmimic_v3'};
+  person='hhtools-retarget';
+  $('pose-badge').textContent='BEYONDMIMIC V3';
+  $('source-watermark').textContent=tr('YouTube 秒數 → HHTools v3 · root 已導入','YouTube seconds → HHTools v3 · root imported');
+  $('retarget-status').textContent='BeyondMimic v3 · '+record.frame_count+tr(' frames · ',' frames · ')+Number(record.duration_s).toFixed(2)+' s';
+  const qa=record.qa||{};
+  const warn=(qa.warnings||[]).length?tr(' · QA 警告 ',' · QA warnings ')+(qa.warnings||[]).length:'';
+  const fix=(record.repairs||[]).length?tr(' · 已修復 hip Pitch',' · hip Pitch repaired'):'';
+  status.textContent=t('hhtools_yt_ready')+' · id '+record.id.slice(0,8)+warn+fix;
+  $('motion-note').textContent=t('hhtools_yt_ready');
+  feedback(status.textContent);
+  toast(tr('已匯入 Ballet v3 動作，可設計訓練。','Ballet v3 motion imported — design training next.'));
+ }catch(e){status.textContent=e.message;status.classList.add('error');feedback(e.message,true);}
+ finally{button.disabled=false;}
+}
 async function loadRobot(type){
  referencePlayer.clear();retarget.resetCapture();$('people').replaceChildren();$('people').dataset.signature='';document.querySelectorAll('[data-robot]').forEach(b=>b.disabled=true);
  robotType=type;document.querySelectorAll('[data-robot]').forEach(b=>{b.classList.toggle('active',b.dataset.robot===type);b.setAttribute('aria-pressed',String(b.dataset.robot===type));});$('retarget-robot-label').textContent=robotName();$('joint-count').textContent=tr('載入原生關節…','Loading native joints…');renderRewards();renderFeatured();retarget.setRobot(robot());updateSummary();updateModeNote();document.querySelectorAll('[data-spec-robot]').forEach(c=>c.classList.toggle('active',c.dataset.specRobot===type));
@@ -121,7 +149,7 @@ async function startJob(){
  $('start-job').disabled=true;try{const segment=hhtoolsReady||source.type==='example'?undefined:clipEditor.getSegment();const action_name=hhtoolsReady?(hhtoolsMotion.action_name||source.title||'HHTools motion'):source.type==='example'?tr('Kung Fu · 程序化範例','Kung Fu · procedural example'):clipEditor.getActionName();const mode=document.querySelector('[name=run-mode]:checked').value;referencePlayer.stop();let motion_id=hhtoolsReady?hhtoolsMotion.id:undefined;if(!motion_id){const motion=referencePlayer.hasReference()?referencePlayer.getMotion(segment):await retarget.exportMotion(robot());if(motion.frames.length>=2){motion.urdf_sha256=robot().urdf_sha256;const record=await api('/api/motions',motion);motion_id=record.id;}}
  if(mode==='worker'&&robotType!=='leg'){toast(tr('真實訓練目前支援雙足 Q1 Leg；雙輪請先用 demo。','Real training currently supports the biped Q1 Leg; use the demo for wheeled.'));return;}
  if(mode==='worker'&&!motion_id){toast(tr('真實訓練需要先辨識影片或匯入 HHTools 參考。','Real training needs video recognition or an HHTools reference first.'));panel('source');return;}
- const payload={robot_type:robotType,source,target_person:person,config:config(),mode,motion_id,segment,action_name};if(hhtoolsReady)payload.pipeline='beyondmimic';
+ const payload={robot_type:robotType,source,target_person:person,config:config(),mode,motion_id,segment,action_name};if(hhtoolsReady)payload.pipeline=hhtoolsMotion.pipeline||source.pipeline||'beyondmimic';
  currentJob=await api('/api/jobs',payload);localStorage.setItem(CURRENT_JOB_KEY,currentJob.id);panel('result');await renderJob(currentJob);watchJob(currentJob);renderJobList();toast(mode==='demo'?tr('已開始 30 秒概念流程。','Started the 30-second concept flow.'):catalog.capabilities.worker_available?tr('已排入 GPU worker，開始真實訓練。','Queued on the GPU worker; real training starts now.'):tr('已排入訓練佇列；GPU worker 上線後會開始訓練。','Added to the training queue; training starts once the GPU worker is online.'));}catch(e){toast(e.message);}finally{$('start-job').disabled=false;}}
 const stateLabels=()=>({ingesting:tr('載入來源影片','Loading source video'),queued:tr('準備工作','Preparing job'),retargeting:tr('轉錄與映射關節','Transcribing and mapping joints'),training:tr('PPO 訓練流程示意','PPO training sketch'),rendering:tr('Isaac Sim rendering 流程示意','Isaac Sim rendering sketch'),complete:tr('概念流程完成','Concept flow complete'),queued_for_worker:tr('等待 GPU worker','Waiting for GPU worker'),preparing:tr('整理關節參考','Preparing joint reference'),waiting_for_gpu:tr('等待 GPU','Waiting for GPU'),starting_isaac:tr('啟動 Isaac Sim / Isaac Lab','Starting Isaac Sim / Isaac Lab'),evaluating:tr('評估策略','Evaluating policy'),recording:tr('錄製結果','Recording result'),cancelled:tr('工作已取消','Job cancelled'),failed:tr('工作失敗','Job failed')});
 const workerStateLabels=()=>({training:tr('Isaac Lab PPO 訓練中','Isaac Lab PPO training'),complete:tr('訓練完成','Training complete'),rendering:tr('錄製結果','Recording result')});
@@ -188,7 +216,7 @@ async function boot(){
  [heroViewer,studioViewer]=await Promise.all([create($('hero-viewer'),{}),create($('studio-viewer'),{onStatus:message=>{$('retarget-status').textContent=message;}})]);await heroViewer?.loadRobot(robot());await studioViewer?.loadRobot(robot());heroViewer?.setMotion('stand');heroViewer?.setPlaying(false);studioViewer?.setPlaying(false);renderJointPanel();$('joint-count').textContent=robot().movable_joints+tr(' 個原生關節 · ',' native joints · ')+robot().control_joints.length+tr(' 控制軸',' control axes');const firstClip=catalog.video_examples?.find(v=>v.robot_type===robotType);if(firstClip)await loadFeature(firstClip);else await demo();updateSummary();
  }catch(e){feedback(tr('工作室載入失敗：','Studio failed to load: ')+e.message,true);toast(tr('載入失敗，請重新整理。','Load failed. Please refresh.'));console.error(e);}
 }
-document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>panel(b.dataset.panel));document.querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>panel(b.dataset.next));document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>selectSource(b.dataset.source).catch(e=>feedback(e.message,true)));document.querySelectorAll('[data-robot]').forEach(b=>b.onclick=()=>loadRobot(b.dataset.robot).catch(e=>toast(e.message)));$('load-example').onclick=()=>demo();$('source-youtube').onsubmit=youtube;$('track-video').onclick=()=>startTracking().catch(e=>feedback(e.message,true));$('hhtools-import').onclick=()=>importHHTools().catch(e=>feedback(e.message,true));$('hhtools-file').onchange=()=>{const file=$('hhtools-file').files?.[0];if(file&&!$('hhtools-action').value.trim())$('hhtools-action').value=file.name.replace(/\.csv$/i,'');};
+document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>panel(b.dataset.panel));document.querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>panel(b.dataset.next));document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>selectSource(b.dataset.source).catch(e=>feedback(e.message,true)));document.querySelectorAll('[data-robot]').forEach(b=>b.onclick=()=>loadRobot(b.dataset.robot).catch(e=>toast(e.message)));$('load-example').onclick=()=>demo();$('source-youtube').onsubmit=youtube;$('track-video').onclick=()=>startTracking().catch(e=>feedback(e.message,true));$('hhtools-import').onclick=()=>importHHTools().catch(e=>feedback(e.message,true));if($('hhtools-youtube'))$('hhtools-youtube').onsubmit=importYouTubeHHTools;$('hhtools-file').onchange=()=>{const file=$('hhtools-file').files?.[0];if(file&&!$('hhtools-action').value.trim())$('hhtools-action').value=file.name.replace(/\.csv$/i,'');};
 $('video-file').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>100*1024*1024){feedback(tr('請選擇小於 100 MB 的影片。','Choose a video smaller than 100 MB.'),true);return;}feedback(tr('正在載入 ','Loading ')+file.name+'…');try{const value=await uploadVideo(file);if(sourceObjectUrl)URL.revokeObjectURL(sourceObjectUrl);if(value.url.startsWith('blob:'))sourceObjectUrl=value.url;await loadVideo(value);feedback(isBrowserLocal()?tr('影片在此瀏覽器預覽，不會上傳伺服器。按開始辨識進行 MediaPipe 映射。','The video previews in this browser and is not uploaded. Press Start recognition for MediaPipe mapping.'):tr('影片已上傳。按開始辨識進行 MediaPipe 映射。','Video uploaded. Press Start recognition for MediaPipe mapping.'));}catch(e){feedback(e.message,true);}};
 
 $('play-reference').onclick=async()=>{if(!source.motion_reference_url)return;const button=$('play-reference');button.disabled=true;try{retarget.resetCapture();clipEditor.stopPreview();const response=await fetch(source.motion_reference_url);if(!response.ok)throw Error(tr('骨架參考載入失敗。','Failed to load skeleton reference.'));const reference=await response.json();referencePlayer.load(reference,robot());clipEditor.setSegment(reference.segment);person='annotated-source-robot';$('pose-overlay').hidden=false;$('pose-badge').textContent=tr('33 POINTS / 人工校正','33 POINTS / CALIBRATED');$('source-watermark').textContent=tr('來源機器人骨架 · 人工校正 · 非自動辨識結果','Source robot skeleton · manually calibrated · not automatic recognition');$('people').replaceChildren();$('people').dataset.signature='';studioViewer?.setPlaying(false);studioViewer?.setRenderingPaused(false);await referencePlayer.play({segment:reference.segment,loop:true});feedback(tr('正在同步播放來源影片、人工校正的 MediaPipe 33 點格式骨架與 Q1 原生關節。','Playing the source video, the calibrated MediaPipe 33-point skeleton and Q1 native joints in sync.'));}catch(e){feedback(e.message,true);}finally{button.disabled=false;}};
