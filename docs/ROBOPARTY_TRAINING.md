@@ -84,3 +84,7 @@ python3 scripts/seed_beyondmimic_from_motion.py \
   --motion .data/jobs/<id>/motion.json \
   --out .data/roboparty/ballet_beyondmimic.csv
 ```
+
+### Ballet stability fix (root Z)
+
+BeyondMimic reference **re-grounds root Z** with Q1 `grounded_height(q)` while keeping HHTools XY. Raw HHTools CSV pelvis (~1.5 m) must not be fed to Isaac height rewards.

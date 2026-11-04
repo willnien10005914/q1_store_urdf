@@ -1,12 +1,8 @@
-# Q1 Leg HHTools preset (hand-tuned ik_map).
-# Installed by scripts/setup_hhtools_q1.sh into ~/.config/hhtools/robots/q1_leg
-# and human-humanoid-tools/configs/robots/q1_leg.
-
 name: q1_leg
 display_name: Q1 Leg
 urdf: quanta_robot_legged.urdf
 mesh_search_paths:
-- meshes
+- /home/will/projects/human-humanoid-tools/configs/robots/q1_leg/meshes
 length_scale: 1.0
 up_axis: Z
 forward_axis: X
@@ -57,35 +53,35 @@ ik_map:
   right_ankle: right_ankle_roll_link
 weights:
   t_weight:
-    hips: 10.0
-    chest: 0.5
-    left_shoulder: 0.5
+    hips: 12.0
+    chest: 0.8
+    left_shoulder: 0.8
     left_elbow: 1.0
-    left_wrist: 1.0
-    right_shoulder: 0.5
+    left_wrist: 0.8
+    right_shoulder: 0.8
     right_elbow: 1.0
-    right_wrist: 1.0
-    left_hip: 0.5
-    left_knee: 1.0
-    left_ankle: 2.0
-    right_hip: 0.5
-    right_knee: 1.0
-    right_ankle: 2.0
+    right_wrist: 0.8
+    left_hip: 4.0
+    left_knee: 5.0
+    left_ankle: 3.0
+    right_hip: 4.0
+    right_knee: 5.0
+    right_ankle: 3.0
   r_weight:
-    hips: 2.0
-    chest: 0.5
-    left_shoulder: 0.1
+    hips: 3.0
+    chest: 0.8
+    left_shoulder: 0.3
     left_elbow: 0.5
-    left_wrist: 0.5
-    right_shoulder: 0.1
+    left_wrist: 0.4
+    right_shoulder: 0.3
     right_elbow: 0.5
-    right_wrist: 0.5
-    left_hip: 0.2
-    left_knee: 0.5
-    left_ankle: 1.0
-    right_hip: 0.2
-    right_knee: 0.5
-    right_ankle: 1.0
+    right_wrist: 0.4
+    left_hip: 2.0
+    left_knee: 2.5
+    left_ankle: 2.0
+    right_hip: 2.0
+    right_knee: 2.5
+    right_ankle: 2.0
 smooth_joint_filter_masks:
   left_hip_yaw_link: 0.1
   right_hip_yaw_link: 0.1
